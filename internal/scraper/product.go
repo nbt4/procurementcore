@@ -18,7 +18,10 @@ import (
 	xhtml "golang.org/x/net/html"
 )
 
-const maxPageBytes = 2 << 20
+const (
+	maxPageMegabytes = 16
+	maxPageBytes     = maxPageMegabytes << 20
+)
 
 type ProductPreview struct {
 	Name         string            `json:"name"`
@@ -103,14 +106,22 @@ func (f *Fetcher) Scrape(ctx context.Context, rawURL string) (ProductPreview, er
 	if err != nil {
 		return ProductPreview{}, errors.New("Produktseite konnte nicht gelesen werden")
 	}
-	if len(body) > maxPageBytes {
-		return ProductPreview{}, errors.New("Produktseite ist größer als 2 MB")
+	return parseDownloadedPage(body, response.Request.URL, maxPageBytes)
+}
+
+func parseDownloadedPage(body []byte, sourceURL *url.URL, limit int) (ProductPreview, error) {
+	truncated := len(body) > limit
+	if truncated {
+		body = body[:limit]
 	}
-	preview, err := ParseHTML(strings.NewReader(string(body)), response.Request.URL)
-	if err != nil {
-		return ProductPreview{}, err
+	preview, err := ParseHTML(strings.NewReader(string(body)), sourceURL)
+	if err == nil {
+		return preview, nil
 	}
-	return preview, nil
+	if truncated {
+		return ProductPreview{}, fmt.Errorf("in den ersten %d MB wurden keine Produktdaten gefunden", maxPageMegabytes)
+	}
+	return ProductPreview{}, err
 }
 
 func (f *Fetcher) validateURL(ctx context.Context, target *url.URL) error {

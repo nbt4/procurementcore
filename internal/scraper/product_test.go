@@ -42,6 +42,18 @@ func TestParseHTMLFallsBackToOpenGraph(t *testing.T) {
 	}
 }
 
+func TestParseDownloadedPageAcceptsLargePagesWithEarlyMetadata(t *testing.T) {
+	source, _ := url.Parse("https://shop.example/item")
+	page := []byte(`<html><head><meta property="og:title" content="Großer Artikel"></head><body>` + strings.Repeat("x", 300))
+	preview, err := parseDownloadedPage(page, source, 128)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.Name != "Großer Artikel" {
+		t.Fatalf("unexpected preview: %+v", preview)
+	}
+}
+
 func TestIsPublicIPBlocksInternalNetworks(t *testing.T) {
 	blocked := []string{"127.0.0.1", "10.0.0.2", "172.16.0.1", "192.168.1.2", "169.254.169.254", "100.64.0.1", "::1"}
 	for _, value := range blocked {
