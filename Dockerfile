@@ -14,7 +14,7 @@ COPY --from=frontend /app/cmd/server/dist ./cmd/server/dist
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o procurementcore ./cmd/server
 
 FROM alpine:3.22
-RUN apk add --no-cache ca-certificates tzdata wget && addgroup -S app && adduser -S app -G app && mkdir -p /var/lib/branding/logos && chown -R app:app /var/lib/branding /app
+RUN apk add --no-cache ca-certificates tzdata wget && addgroup -S app && adduser -S app -G app && mkdir -p /var/lib/branding/logos /app && chown -R app:app /var/lib/branding /app
 WORKDIR /app
 COPY --from=builder --chown=app:app /app/procurementcore ./procurementcore
 COPY --from=builder --chown=app:app /app/migrations ./migrations
