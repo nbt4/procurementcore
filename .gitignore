@@ -1,0 +1,8 @@
+.env
+server
+web/node_modules/
+web/dist/
+cmd/server/dist/assets/
+*.log
+*.tsbuildinfo
+.DS_Store
