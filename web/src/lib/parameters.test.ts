@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildParameterSchema } from './parameters'
+import { buildParameterSchema, editParameters, mapImportedParameters } from './parameters'
 
 describe('buildParameterSchema', () => {
   it('creates API schema without exposing JSON editing', () => {
@@ -17,5 +17,18 @@ describe('buildParameterSchema', () => {
       { label:'Größe', type:'text', unit:'', options:'' },
       { label:'Große', type:'text', unit:'', options:'' },
     ])).toThrow('eindeutig')
+  })
+
+  it('preserves stored keys while editing labels', () => {
+    const drafts = editParameters([{ key:'leistung', label:'Leistung', type:'number', unit:'W' }])
+    drafts[0].label = 'Nennleistung'
+    expect(buildParameterSchema(drafts)[0]).toMatchObject({ key:'leistung', label:'Nennleistung' })
+  })
+
+  it('maps scraped attributes to category fields', () => {
+    expect(mapImportedParameters([
+      { key:'leistung', label:'Leistung', type:'number', unit:'W' },
+      { key:'dimmbar', label:'Dimmbar', type:'boolean' },
+    ], { Leistung:'80 W', Dimmbar:'Ja', Ignoriert:'Wert' })).toEqual({ leistung:80, dimmbar:true })
   })
 })

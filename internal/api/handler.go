@@ -12,6 +12,7 @@ import (
 
 	"procurementcore/internal/auth"
 	"procurementcore/internal/models"
+	"procurementcore/internal/scraper"
 	"procurementcore/internal/service"
 
 	"github.com/go-chi/chi/v5"
@@ -19,10 +20,11 @@ import (
 )
 
 type Handler struct {
-	db *gorm.DB
+	db      *gorm.DB
+	scraper *scraper.Fetcher
 }
 
-func NewHandler(db *gorm.DB) *Handler { return &Handler{db: db} }
+func NewHandler(db *gorm.DB) *Handler { return &Handler{db: db, scraper: scraper.New()} }
 
 func (h *Handler) Routes() http.Handler {
 	r := chi.NewRouter()
@@ -37,6 +39,7 @@ func (h *Handler) Routes() http.Handler {
 	r.With(auth.RequireAdmin).Put("/suppliers/{id}", h.updateSupplier)
 	r.With(auth.RequireAdmin).Delete("/suppliers/{id}", h.deleteSupplier)
 	r.Get("/products", h.listProducts)
+	r.With(auth.RequireAdmin).Post("/products/import-preview", h.importProductPreview)
 	r.Get("/products/{id}", h.getProduct)
 	r.With(auth.RequireAdmin).Post("/products", h.createProduct)
 	r.With(auth.RequireAdmin).Put("/products/{id}", h.updateProduct)
@@ -65,6 +68,21 @@ func (h *Handler) Routes() http.Handler {
 	r.Get("/activity", h.listActivity)
 	r.Get("/export/spend.csv", h.exportSpend)
 	return r
+}
+
+func (h *Handler) importProductPreview(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		URL string `json:"url"`
+	}
+	if !decode(w, r, &input) {
+		return
+	}
+	preview, err := h.scraper.Scrape(r.Context(), input.URL)
+	if err != nil {
+		badRequest(w, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, preview)
 }
 
 func (h *Handler) me(w http.ResponseWriter, r *http.Request) {
