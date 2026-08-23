@@ -4,14 +4,15 @@ ProcurementCore ist der Einkaufs-Service des Cores-Ökosystems. Er verbindet Bed
 
 ## Funktionsumfang
 
-- Katalog mit frei definierbaren Kategorieparametern und parameterbasierter Suche
+- Katalog mit visuellem Parameter-Editor und parameterbasierter Suche ohne JSON-Eingabe
 - Lieferantenstamm mit Preferred-Status, Konditionen, Lieferzeit, Bewertung und Risiko
 - Mehrere Angebote pro Artikel mit Einkaufslink, Mindestmenge, Packgröße und Preisverlauf
 - Tiefpreis-Alarme, die bei neuen oder geänderten Angeboten automatisch auslösen
 - Bedarfsmeldungen mit Entwurf, Einreichung, Freigabe, Ablehnung und Bestellkonvertierung
 - Direktbestellungen, Lieferstatus, Teil- und Komplettwareneingänge
 - Spend-, Einsparungs- und Aktivitätsübersicht sowie CSV-Export
-- Gemeinsames Cores-SSO über `cores_token`, zentrales Branding und responsive Cores-Oberfläche
+- Gemeinsames Cores-SSO über `cores_token` mit zentralem Login und serviceübergreifendem Logout
+- Zentrales Branding und responsive Cores-Oberfläche für Desktop und Mobilgeräte
 
 ## Entwicklung
 

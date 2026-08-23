@@ -14,7 +14,6 @@ a { color: inherit; }
 .brand img { max-width: 176px; max-height: 45px; object-fit: contain; }
 .brand-mark { display:grid; place-items:center; width:38px; height:38px; flex:none; border-radius:12px; background:linear-gradient(145deg,#fb3158,#a90f37); font-weight:900; box-shadow:0 8px 22px rgba(225,29,72,.25); }
 .brand-title { min-width:0; font-size:.98rem; font-weight:800; letter-spacing:-.02em; }
-.brand-subtitle { color:var(--text-muted); font-size:.69rem; text-transform:uppercase; letter-spacing:.13em; }
 .nav { display:flex; flex:1; flex-direction:column; gap:.28rem; padding:1rem .75rem; overflow:auto; }
 .nav a { display:flex; align-items:center; gap:.78rem; min-height:44px; padding:.7rem .8rem; border-radius:var(--radius-md); color:var(--text-secondary); font-size:.9rem; font-weight:650; text-decoration:none; }
 .nav a:hover { background:var(--surface-hover); color:var(--text-primary); }
@@ -25,6 +24,8 @@ a { color: inherit; }
 .user-meta { min-width:0; flex:1; }
 .user-name { overflow:hidden; text-overflow:ellipsis; font-size:.82rem; font-weight:700; white-space:nowrap; }
 .user-role { color:var(--text-muted); font-size:.68rem; }
+.logout-button { width:100%; margin-top:.25rem; color:#ff8b8b!important; }
+.logout-button:disabled,.mobile-logout:disabled { cursor:wait; opacity:.55; }
 .main { width:calc(100% - 252px); min-width:0; margin-left:252px; }
 .topbar { position:sticky; z-index:20; top:0; display:flex; min-height:64px; align-items:center; justify-content:space-between; padding:.75rem 1.5rem; border-bottom:var(--border-default); background:rgba(9,9,11,.88); backdrop-filter:blur(18px); }
 .topbar h1 { margin:0; font-size:1.05rem; }
@@ -89,6 +90,14 @@ tbody tr:hover td { background:rgba(255,255,255,.018); }
 .product-card p { margin:0; color:var(--text-muted); font-size:.76rem; line-height:1.45; }
 .param-chips { display:flex; flex-wrap:wrap; gap:.35rem; margin:.85rem 0; }
 .param-chip { padding:.28rem .44rem; border-radius:6px; color:var(--text-secondary); background:var(--surface-2); font-size:.64rem; }
+.parameter-heading { display:flex; align-items:end; justify-content:space-between; gap:1rem; margin:1.25rem 0 .7rem; }
+.parameter-heading h4 { margin:0 0 .25rem; }
+.parameter-heading p { margin:0; color:var(--text-muted); font-size:.75rem; }
+.parameter-list { display:grid; gap:.65rem; }
+.parameter-editor { display:grid; grid-template-columns:1.3fr .85fr .8fr 40px; gap:.55rem; align-items:end; padding:.8rem; border:var(--border-default); border-radius:var(--radius-md); background:var(--surface-2); }
+.parameter-editor.has-options { grid-template-columns:1.3fr .85fr .8fr 1.3fr 40px; }
+.parameter-remove { align-self:end; justify-self:end; }
+.parameter-empty { padding:1.3rem; border:1px dashed rgba(255,255,255,.16); border-radius:var(--radius-md); color:var(--text-muted); background:var(--surface-2); font-size:.78rem; text-align:center; }
 .product-bottom { display:flex; align-items:end; justify-content:space-between; gap:.5rem; margin-top:auto; padding-top:.9rem; border-top:var(--border-default); }
 .price { font-size:1.18rem; font-weight:850; }
 .price small { display:block; margin-bottom:.15rem; color:var(--text-muted); font-size:.62rem; font-weight:600; }
@@ -108,7 +117,10 @@ tbody tr:hover td { background:rgba(255,255,255,.018); }
 .notice { margin-bottom:1rem; padding:.7rem .85rem; border-radius:var(--radius-md); color:#ffb3c1; background:var(--accent-soft); font-size:.78rem; }
 .toast { position:fixed; z-index:200; right:1rem; bottom:1rem; max-width:360px; padding:.8rem 1rem; border:var(--border-default); border-radius:var(--radius-md); color:var(--text-primary); background:var(--surface-3); box-shadow:var(--shadow-lg); font-size:.8rem; }
 .mobile-header, .mobile-tabs { display:none; }
+.mobile-actions { display:flex; align-items:center; gap:.45rem; }
+.mobile-logout { display:grid; width:34px; height:34px; place-items:center; padding:0; border:var(--border-default); border-radius:9px; color:#ff8b8b; background:transparent; }
 @media(max-width:1050px){ .metrics{grid-template-columns:repeat(2,1fr)} .dashboard-lower{grid-template-columns:1fr} .workflow{grid-template-columns:repeat(3,1fr)} }
 @media(max-width:760px){
   input,select,textarea{font-size:16px}.sidebar{display:none}.main{width:100%;margin:0;padding-top:58px;padding-bottom:70px}.topbar{display:none}.mobile-header{position:fixed;z-index:25;inset:0 0 auto;display:flex;height:58px;align-items:center;justify-content:space-between;padding:.65rem 1rem;border-bottom:var(--border-default);background:rgba(17,17,20,.94);backdrop-filter:blur(16px)}.mobile-header strong{font-size:.88rem}.mobile-tabs{position:fixed;z-index:25;inset:auto 0 0;display:grid;grid-template-columns:repeat(5,1fr);padding:.35rem .25rem max(.35rem,env(safe-area-inset-bottom));border-top:var(--border-default);background:rgba(17,17,20,.96);backdrop-filter:blur(16px)}.mobile-tabs a{display:flex;min-width:0;min-height:52px;flex-direction:column;align-items:center;justify-content:center;gap:.18rem;border-radius:8px;color:var(--text-muted);font-size:.58rem;text-decoration:none}.mobile-tabs a.active{color:#ff708c;background:var(--accent-soft)}.content{padding:1rem}.page-header{align-items:flex-start;flex-direction:column}.metrics{grid-template-columns:1fr 1fr}.metric{min-height:116px}.workflow{grid-template-columns:1fr 1fr}.toolbar{align-items:stretch;flex-direction:column}.toolbar select{width:100%}.filter-grid{grid-template-columns:1fr 1fr}.form-grid{grid-template-columns:1fr}.field.full{grid-column:auto}.line-editor{grid-template-columns:1fr 1fr}.line-editor .description{grid-column:1/-1}.table-wrap{border-right:0;border-left:0;border-radius:0;margin-inline:-1rem}.cards{grid-template-columns:1fr}.modal-backdrop{padding:0}.modal{width:100%;height:100dvh;max-height:none;border:0;border-radius:0}.hide-mobile{display:none}}
-@media(max-width:440px){.metrics,.filter-grid,.workflow{grid-template-columns:1fr}.metric{min-height:104px}}
+@media(max-width:900px){.parameter-heading{align-items:stretch;flex-direction:column}.parameter-editor{grid-template-columns:1fr 1fr}.parameter-editor .parameter-remove{grid-column:2;justify-self:end}.parameter-editor .field:nth-child(4){grid-column:1/-1}}
+@media(max-width:440px){.metrics,.filter-grid,.workflow{grid-template-columns:1fr}.metric{min-height:104px}.parameter-editor{grid-template-columns:1fr}.parameter-editor .parameter-remove{grid-column:1}}

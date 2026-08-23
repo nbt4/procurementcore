@@ -22,7 +22,7 @@ import (
 	"github.com/rs/zerolog"
 )
 
-const version = "1.0.2"
+const version = "1.0.3"
 
 //go:embed all:dist
 var frontend embed.FS
@@ -55,6 +55,7 @@ func main() {
 		writeJSON(w, status, map[string]string{"status": state, "service": "procurementcore", "version": version})
 	})
 	mux.HandleFunc("GET /api/v1/branding", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, http.StatusOK, branding.GetConfig()) })
+	mux.HandleFunc("POST /api/v1/auth/logout", logoutHandler(cfg.CookieDomain))
 	mux.Handle("/logos/", http.StripPrefix("/logos/", http.FileServer(http.Dir("/var/lib/branding/logos"))))
 	mux.Handle("/api/v1/", http.StripPrefix("/api/v1", auth.Middleware(api.NewHandler(db).Routes())))
 
@@ -120,6 +121,21 @@ func securityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'")
 		next.ServeHTTP(w, r)
 	})
+}
+func logoutHandler(cookieDomain string) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		http.SetCookie(w, &http.Cookie{
+			Name:     "cores_token",
+			Value:    "",
+			Path:     "/",
+			Domain:   cookieDomain,
+			HttpOnly: true,
+			Secure:   cookieDomain != "",
+			SameSite: http.SameSiteLaxMode,
+			MaxAge:   -1,
+		})
+		writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+	}
 }
 func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")

@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
-import { BellRing, Boxes, Building2, ClipboardCheck, FileDown, Gauge, Home, Menu, ShoppingCart, Users } from 'lucide-react'
+import { BellRing, Boxes, Building2, ClipboardCheck, FileDown, Gauge, Home, LogOut, Menu, ShoppingCart, Users } from 'lucide-react'
 import { api, apiBase } from './lib/api'
 import type { Branding, User } from './lib/types'
 import DashboardPage from './pages/DashboardPage'
@@ -25,20 +25,30 @@ const navigation = [
 
 function Shell({ user, branding, children }:{ user:User; branding:Branding|null; children:React.ReactNode }) {
   const location = useLocation()
+  const [loggingOut,setLoggingOut] = useState(false)
   const active = navigation.find(item => item.to === '/' ? location.pathname === '/' : location.pathname.startsWith(item.to))
+  const logout = async () => {
+    setLoggingOut(true)
+    try {
+      await fetch(`${apiBase}/auth/logout`, { method:'POST', credentials:'include' })
+    } finally {
+      window.location.assign(new URL('/login', window.__DASHBOARD_URL__ || window.location.origin).toString())
+    }
+  }
   return <div className="shell">
     <aside className="sidebar">
       <a className="brand" href={window.__DASHBOARD_URL__ || '/'}>
-        {branding?.sidebarLogo ? <img src={branding.sidebarLogo} alt="ProcurementCore"/> : <><span className="brand-mark">P</span><span><span className="brand-title">ProcurementCore</span><span className="brand-subtitle">Einkauf</span></span></>}
+        {branding?.sidebarLogo ? <img src={branding.sidebarLogo} alt="ProcurementCore"/> : <><span className="brand-mark">P</span><span className="brand-title">ProcurementCore</span></>}
       </a>
       <nav className="nav">{navigation.map(({to,label,icon:Icon})=><NavLink key={to} to={to} end={to==='/' }><Icon size={18}/><span>{label}</span></NavLink>)}</nav>
       <div className="sidebar-footer">
         <a className="btn ghost" style={{width:'100%',marginBottom:'.5rem'}} href={`${apiBase}/export/spend.csv`}><FileDown size={16}/> Spend exportieren</a>
         <a className="btn ghost" style={{width:'100%',marginBottom:'.55rem'}} href={window.__DASHBOARD_URL__ || '/'}><Home size={16}/> Cores Dashboard</a>
         <div className="user"><div className="avatar">{user.username.slice(0,1).toUpperCase()}</div><div className="user-meta"><div className="user-name">{user.username}</div><div className="user-role">{user.isAdmin?'Einkaufsadministration':'Anforderer'}</div></div></div>
+        <button className="btn ghost logout-button" disabled={loggingOut} onClick={logout}><LogOut size={16}/>{loggingOut?'Wird abgemeldet …':'Abmelden'}</button>
       </div>
     </aside>
-    <header className="mobile-header"><strong>ProcurementCore</strong><span className="badge pink"><Menu size={13}/>{active?.label}</span></header>
+    <header className="mobile-header"><strong>ProcurementCore</strong><span className="mobile-actions"><span className="badge pink"><Menu size={13}/>{active?.label}</span><button className="mobile-logout" disabled={loggingOut} onClick={logout} aria-label="Abmelden" title="Abmelden"><LogOut size={17}/></button></span></header>
     <main className="main"><header className="topbar"><h1>{active?.label || 'ProcurementCore'}</h1><div className="top-actions"><span className="badge"><Users size={13}/>{user.username}</span></div></header>{children}</main>
     <nav className="mobile-tabs">{navigation.filter(n=>n.mobile).map(({to,label,icon:Icon})=><NavLink key={to} to={to} end={to==='/' }><Icon size={19}/><span>{label}</span></NavLink>)}</nav>
   </div>
