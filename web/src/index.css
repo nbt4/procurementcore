@@ -109,6 +109,9 @@ tbody tr:hover td { background:rgba(255,255,255,.018); }
 .link-import input { flex:1; }
 .import-hint { margin:.55rem 0 1rem; color:var(--text-muted); font-size:.72rem; line-height:1.45; }
 .import-source { display:flex; align-items:center; gap:.65rem; margin-bottom:1rem; color:var(--text-muted); font-size:.7rem; }
+.import-parameters { grid-column:1/-1; margin-top:1rem; padding:1rem; border:var(--border-default); border-radius:var(--radius-lg); background:var(--surface-2); }
+.import-parameters h4 { margin:0 0 .2rem; }
+.import-parameters > p { margin:0 0 .8rem; color:var(--text-muted); font-size:.72rem; }
 .price-input { display:grid; grid-template-columns:1fr 68px; gap:.4rem; }
 .price-input .currency { text-align:center; text-transform:uppercase; }
 .scraped-attributes { display:flex; flex-wrap:wrap; gap:.4rem; margin-top:1rem; padding-top:1rem; border-top:var(--border-default); }

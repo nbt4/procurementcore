@@ -59,6 +59,9 @@ export function mapImportedParameters(schema: ParameterDefinition[] = [], attrib
       const value = raw.trim().toLowerCase()
       if (['ja','true','yes','1'].includes(value)) result[parameter.key] = true
       if (['nein','false','no','0'].includes(value)) result[parameter.key] = false
+    } else if (parameter.type === 'select') {
+      const option = parameter.options?.find(value => value.toLowerCase() === raw.trim().toLowerCase())
+      if (option) result[parameter.key] = option
     } else {
       result[parameter.key] = raw
     }

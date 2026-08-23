@@ -29,6 +29,7 @@ describe('buildParameterSchema', () => {
     expect(mapImportedParameters([
       { key:'leistung', label:'Leistung', type:'number', unit:'W' },
       { key:'dimmbar', label:'Dimmbar', type:'boolean' },
-    ], { Leistung:'80 W', Dimmbar:'Ja', Ignoriert:'Wert' })).toEqual({ leistung:80, dimmbar:true })
+      { key:'farbe', label:'Farbe', type:'select', options:['Schwarz','Weiß'] },
+    ], { Leistung:'80 W', Dimmbar:'Ja', Farbe:'weiß', Ignoriert:'Wert' })).toEqual({ leistung:80, dimmbar:true, farbe:'Weiß' })
   })
 })
