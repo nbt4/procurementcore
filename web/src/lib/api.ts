@@ -1,6 +1,4 @@
-const pathname = typeof window === 'undefined' ? '/' : window.location.pathname
-const proxied = pathname === '/procurement' || pathname.startsWith('/procurement/')
-export const apiBase = proxied ? '/api/v1/procurement' : '/api/v1'
+export const apiBase = '/api/v1'
 
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(`${apiBase}${path}`, {

@@ -22,7 +22,7 @@ import (
 	"github.com/rs/zerolog"
 )
 
-const version = "1.0.1"
+const version = "1.0.2"
 
 //go:embed all:dist
 var frontend embed.FS
@@ -64,7 +64,6 @@ func main() {
 	}
 	assets := http.FileServer(http.FS(dist))
 	mux.Handle("GET /assets/", assets)
-	mux.Handle("GET /procurement/assets/", http.StripPrefix("/procurement", assets))
 	index, err := fs.ReadFile(dist, "index.html")
 	if err != nil {
 		log.Fatal().Err(err).Msg("index unavailable")
