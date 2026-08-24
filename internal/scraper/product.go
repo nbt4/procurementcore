@@ -1,11 +1,13 @@
 package scraper
 
 import (
+	"compress/gzip"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	stdhtml "html"
@@ -15,6 +17,8 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"path"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,6 +30,7 @@ import (
 const (
 	maxPageMegabytes  = 16
 	maxPageBytes      = maxPageMegabytes << 20
+	maxSitemapBytes   = 32 << 20
 	adamHallAPIBase   = "https://www.adamhall.com/shop/api/shopware"
 	adamHallCacheTime = 5 * time.Minute
 )
@@ -130,10 +135,16 @@ func (f *Fetcher) Scrape(ctx context.Context, rawURL string) (ProductPreview, er
 	if err != nil {
 		return ProductPreview{}, fmt.Errorf("Produktseite konnte nicht abgerufen werden: %w", err)
 	}
-	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		_ = response.Body.Close()
+		if response.StatusCode == http.StatusForbidden && isSTEX24Host(response.Request.URL.Hostname()) {
+			if preview, fallbackErr := f.scrapeSTEX24Sitemap(ctx, response.Request.URL); fallbackErr == nil {
+				return preview, nil
+			}
+		}
 		return ProductPreview{}, fmt.Errorf("Produktseite antwortet mit HTTP %d", response.StatusCode)
 	}
+	defer response.Body.Close()
 	contentType := strings.ToLower(response.Header.Get("Content-Type"))
 	if contentType != "" && !strings.Contains(contentType, "text/html") && !strings.Contains(contentType, "application/xhtml+xml") {
 		return ProductPreview{}, errors.New("Produktlink liefert keine HTML-Seite")
@@ -652,6 +663,228 @@ func ParseHTML(reader io.Reader, sourceURL *url.URL) (ProductPreview, error) {
 func isAdamHallHost(host string) bool {
 	host = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
 	return host == "adamhall.com" || strings.HasSuffix(host, ".adamhall.com")
+}
+
+func isSTEX24Host(host string) bool {
+	host = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
+	return host == "stex24.com" || host == "www.stex24.com"
+}
+
+type sitemapIndex struct {
+	Sitemaps []struct {
+		Location string `xml:"loc"`
+	} `xml:"sitemap"`
+}
+
+func (f *Fetcher) scrapeSTEX24Sitemap(ctx context.Context, sourceURL *url.URL) (ProductPreview, error) {
+	parts := strings.Split(strings.Trim(sourceURL.Path, "/"), "/")
+	locale := ""
+	if len(parts) > 1 && (parts[0] == "de" || parts[0] == "fr") {
+		locale = parts[0] + "/"
+	}
+	indexURL := &url.URL{Scheme: "https", Host: "stex24.com", Path: "/" + locale + "sitemap.xml"}
+	response, err := f.getHTML(ctx, indexURL, "application/xml,text/xml")
+	if err != nil {
+		return ProductPreview{}, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return ProductPreview{}, fmt.Errorf("STEX24-Sitemap antwortet mit HTTP %d", response.StatusCode)
+	}
+
+	var index sitemapIndex
+	if err := xml.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&index); err != nil {
+		return ProductPreview{}, errors.New("STEX24-Sitemap konnte nicht gelesen werden")
+	}
+	target := canonicalSTEX24URL(sourceURL)
+	for _, item := range index.Sitemaps {
+		sitemapURL, err := url.Parse(strings.TrimSpace(item.Location))
+		if err != nil || sitemapURL.Scheme != "https" || !isSTEX24Host(sitemapURL.Hostname()) {
+			continue
+		}
+		found, err := f.stex24SitemapContains(ctx, sitemapURL, target)
+		if err == nil && found {
+			return previewFromSTEX24URL(sourceURL)
+		}
+	}
+	return ProductPreview{}, errors.New("Produktlink ist nicht in der öffentlichen STEX24-Sitemap enthalten")
+}
+
+func (f *Fetcher) stex24SitemapContains(ctx context.Context, sitemapURL *url.URL, target string) (bool, error) {
+	response, err := f.getHTML(ctx, sitemapURL, "application/xml,text/xml,application/gzip")
+	if err != nil {
+		return false, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return false, fmt.Errorf("STEX24-Produktsitemap antwortet mit HTTP %d", response.StatusCode)
+	}
+
+	var reader io.Reader = io.LimitReader(response.Body, maxSitemapBytes)
+	if strings.HasSuffix(strings.ToLower(sitemapURL.Path), ".gz") {
+		compressed, err := gzip.NewReader(reader)
+		if err != nil {
+			return false, errors.New("komprimierte STEX24-Sitemap konnte nicht gelesen werden")
+		}
+		defer compressed.Close()
+		reader = io.LimitReader(compressed, maxSitemapBytes)
+	}
+	decoder := xml.NewDecoder(reader)
+	for {
+		token, err := decoder.Token()
+		if errors.Is(err, io.EOF) {
+			return false, nil
+		}
+		if err != nil {
+			return false, errors.New("STEX24-Produktsitemap konnte nicht gelesen werden")
+		}
+		start, ok := token.(xml.StartElement)
+		if !ok || start.Name.Local != "loc" {
+			continue
+		}
+		var location string
+		if err := decoder.DecodeElement(&location, &start); err != nil {
+			return false, errors.New("STEX24-Produktsitemap konnte nicht gelesen werden")
+		}
+		candidate, err := url.Parse(strings.TrimSpace(location))
+		if err == nil && isSTEX24Host(candidate.Hostname()) && canonicalSTEX24URL(candidate) == target {
+			return true, nil
+		}
+	}
+}
+
+func (f *Fetcher) getHTML(ctx context.Context, target *url.URL, accept string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "ProcurementCore Product Import/1.0")
+	req.Header.Set("Accept", accept)
+	return f.client.Do(req)
+}
+
+func canonicalSTEX24URL(value *url.URL) string {
+	cleaned := *value
+	cleaned.Scheme = "https"
+	cleaned.Host = "stex24.com"
+	cleaned.RawQuery = ""
+	cleaned.Fragment = ""
+	cleaned.Path = strings.TrimSuffix(cleaned.Path, "/")
+	cleaned.RawPath = ""
+	return cleaned.String()
+}
+
+var (
+	stexSizePattern  = regexp.MustCompile(`\b(\d+)-(\d+)mm\b`)
+	stexInchPattern  = regexp.MustCompile(`\b(\d+)-(\d+)(?:-(\d+))?-zoll\b`)
+	stexRatioPattern = regexp.MustCompile(`\b(\d+)zu(\d+)\b`)
+)
+
+func previewFromSTEX24URL(sourceURL *url.URL) (ProductPreview, error) {
+	slug := path.Base(strings.TrimSuffix(sourceURL.Path, "/"))
+	lastDash := strings.LastIndex(slug, "-")
+	if lastDash < 1 || !allDigits(slug[lastDash+1:]) {
+		return ProductPreview{}, errors.New("STEX24-Produktlink enthält keine Artikelnummer")
+	}
+	sku := slug[lastDash+1:]
+	productSlug := slug[:lastDash]
+	model := ""
+	if firstDash := strings.Index(productSlug, "-"); firstDash > 0 && allDigits(productSlug[:firstDash]) {
+		model = productSlug[:firstDash]
+		productSlug = productSlug[firstDash+1:]
+	}
+
+	attributes := map[string]string{}
+	if match := stexRatioPattern.FindStringSubmatch(productSlug); len(match) == 3 {
+		attributes["Schrumpfrate"] = match[1] + ":" + match[2]
+	}
+	if match := stexSizePattern.FindStringSubmatch(productSlug); len(match) == 3 {
+		attributes["Baugröße"] = stexDecimal(match[1]) + "/" + stexDecimal(match[2]) + " mm"
+	}
+	if match := stexInchPattern.FindStringSubmatch(productSlug); len(match) == 4 {
+		if match[3] == "" {
+			attributes["Zollgröße"] = match[1] + "/" + match[2] + " Zoll"
+		} else {
+			attributes["Zollgröße"] = match[1] + " " + match[2] + "/" + match[3] + " Zoll"
+		}
+	}
+	for token, value := range map[string]string{"sw": "schwarz", "br": "braun", "bl": "blau", "ge": "gelb", "gn": "grün", "or": "orange", "rt": "rot", "tr": "transparent", "ws": "weiß"} {
+		if strings.Contains("-"+productSlug+"-", "-"+token+"-") {
+			attributes["Farbe"] = value
+			break
+		}
+	}
+	for _, token := range strings.Split(productSlug, "-") {
+		if strings.EqualFold(token, "wsb2") || strings.EqualFold(token, "wsr2") {
+			attributes["Serie"] = strings.ToUpper(token)
+			break
+		}
+	}
+
+	display := stexRatioPattern.ReplaceAllString(productSlug, "$1:$2")
+	display = stexSizePattern.ReplaceAllStringFunc(display, func(value string) string {
+		match := stexSizePattern.FindStringSubmatch(value)
+		return stexDecimal(match[1]) + "/" + stexDecimal(match[2]) + " mm"
+	})
+	display = stexInchPattern.ReplaceAllStringFunc(display, func(value string) string {
+		match := stexInchPattern.FindStringSubmatch(value)
+		if match[3] == "" {
+			return match[1] + "/" + match[2] + " Zoll"
+		}
+		return match[1] + " " + match[2] + "/" + match[3] + " Zoll"
+	})
+	words := strings.Fields(strings.ReplaceAll(display, "-", " "))
+	for index, word := range words {
+		lower := strings.ToLower(word)
+		if color := attributes["Farbe"]; lower != "" && color != "" && lower == stexColorCode(color) {
+			words[index] = color
+		} else if lower == "wsb2" || lower == "wsr2" {
+			words[index] = strings.ToUpper(lower)
+		}
+	}
+	name := strings.Join(words, " ")
+	if name != "" {
+		name = strings.ToUpper(name[:1]) + name[1:]
+	}
+	return ProductPreview{
+		Name:         name,
+		SKU:          sku,
+		Manufacturer: "STEX24",
+		Model:        model,
+		Currency:     "EUR",
+		PurchaseURL:  sourceURL.String(),
+		Attributes:   attributes,
+		Source:       "STEX24 Sitemap (eingeschränkte Vorschau)",
+	}, nil
+}
+
+func stexDecimal(value string) string {
+	number, err := strconv.Atoi(value)
+	if err != nil {
+		return value
+	}
+	return fmt.Sprintf("%d,%d", number/10, number%10)
+}
+
+func stexColorCode(color string) string {
+	for code, value := range map[string]string{"sw": "schwarz", "br": "braun", "bl": "blau", "ge": "gelb", "gn": "grün", "or": "orange", "rt": "rot", "tr": "transparent", "ws": "weiß"} {
+		if value == color {
+			return code
+		}
+	}
+	return ""
+}
+
+func allDigits(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, character := range value {
+		if character < '0' || character > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func applyAdamHallPage(preview *ProductPreview, document *xhtml.Node) {

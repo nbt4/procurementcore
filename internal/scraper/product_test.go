@@ -1,9 +1,12 @@
 package scraper
 
 import (
+	"bytes"
+	"compress/gzip"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +17,12 @@ import (
 	"testing"
 	"time"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return fn(request)
+}
 
 func TestParseHTMLUsesJSONLDProduct(t *testing.T) {
 	source, _ := url.Parse("https://shop.example/products/lamp")
@@ -59,6 +68,41 @@ func TestParseDownloadedPageAcceptsLargePagesWithEarlyMetadata(t *testing.T) {
 	}
 	if preview.Name != "Großer Artikel" {
 		t.Fatalf("unexpected preview: %+v", preview)
+	}
+}
+
+func TestSTEX24SitemapFallbackUsesVerifiedProductURL(t *testing.T) {
+	source, _ := url.Parse("https://stex24.com/de/136382-schrumpfschlauch-2zu1-wsb2-tr-160-80mm-5-8-zoll-136382")
+	productSitemap := new(bytes.Buffer)
+	compressed := gzip.NewWriter(productSitemap)
+	_, _ = compressed.Write([]byte(`<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>` + source.String() + `</loc></url></urlset>`))
+	_ = compressed.Close()
+
+	fetcher := &Fetcher{client: &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		var body []byte
+		switch request.URL.Path {
+		case "/de/sitemap.xml":
+			body = []byte(`<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><sitemap><loc>https://stex24.com/sitemap/products.xml.gz</loc></sitemap></sitemapindex>`)
+		case "/sitemap/products.xml.gz":
+			body = productSitemap.Bytes()
+		default:
+			t.Fatalf("unexpected sitemap request: %s", request.URL)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(body)), Header: make(http.Header), Request: request}, nil
+	})}}
+
+	preview, err := fetcher.scrapeSTEX24Sitemap(t.Context(), source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.Name != "Schrumpfschlauch 2:1 WSB2 transparent 16,0/8,0 mm 5/8 Zoll" {
+		t.Fatalf("unexpected product name: %q", preview.Name)
+	}
+	if preview.SKU != "136382" || preview.Model != "136382" || preview.Manufacturer != "STEX24" {
+		t.Fatalf("unexpected identity: %+v", preview)
+	}
+	if preview.Attributes["Baugröße"] != "16,0/8,0 mm" || preview.Attributes["Farbe"] != "transparent" || preview.Attributes["Zollgröße"] != "5/8 Zoll" {
+		t.Fatalf("unexpected URL attributes: %+v", preview.Attributes)
 	}
 }
 
@@ -252,6 +296,20 @@ func TestAdamHallLivePrice(t *testing.T) {
 	}
 	if preview.SKU != "8747X6" || preview.PriceCents <= 0 || preview.Currency != "EUR" {
 		t.Fatalf("unexpected live Adam Hall preview: %+v", preview)
+	}
+}
+
+func TestSTEX24LiveSitemapFallback(t *testing.T) {
+	if os.Getenv("STEX24_LIVE_TEST") != "1" {
+		t.Skip("set STEX24_LIVE_TEST=1 to test the live sitemap fallback")
+	}
+	fetcher := New(Options{})
+	preview, err := fetcher.Scrape(t.Context(), "https://stex24.com/de/136382-schrumpfschlauch-2zu1-wsb2-tr-160-80mm-5-8-zoll-136382")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.SKU != "136382" || preview.Attributes["Baugröße"] != "16,0/8,0 mm" || preview.Source != "STEX24 Sitemap (eingeschränkte Vorschau)" {
+		t.Fatalf("unexpected live STEX24 preview: %+v", preview)
 	}
 }
 
