@@ -116,7 +116,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .btn:hover { background: #293436; }
 .btn:active { background: #303c3e; }
 .btn:disabled { cursor: not-allowed; opacity: .48; }
-.btn.primary { border-color: #c18c50; background: var(--accent); color: #14100c; }
+.btn.primary { border-color: #d35a6c; background: var(--accent); color: #fff7f8; }
 .btn.primary:hover { border-color: var(--accent-strong); background: var(--accent-strong); }
 .btn.ghost { border-color: var(--border-color); background: transparent; color: var(--text-secondary); }
 .btn.ghost:hover { border-color: #435053; background: var(--surface-2); color: var(--text-primary); }
@@ -170,6 +170,10 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .table-wrap { overflow: auto; border: var(--border-default); border-radius: var(--radius-lg); }
 table { width: 100%; border-collapse: collapse; background: var(--surface-1); font-variant-numeric: tabular-nums; }
 th { padding: .68rem .82rem; color: #818c89; background: #151d1f; font-size: .61rem; font-weight: 620; letter-spacing: .07em; text-align: left; text-transform: uppercase; white-space: nowrap; }
+.sortable { padding: 0; }
+.sort-button { display: flex; width: 100%; min-height: 36px; align-items: center; justify-content: space-between; gap: .5rem; border: 0; padding: .68rem .82rem; background: transparent; color: inherit; font: inherit; font-weight: inherit; letter-spacing: inherit; text-align: left; text-transform: inherit; }
+.sort-button:hover { background: #1b2426; color: var(--text-primary); }
+.sort-button svg { flex: none; color: var(--accent-strong); }
 td { padding: .76rem .82rem; border-top: 1px solid var(--border-subtle); color: var(--text-secondary); font-size: .76rem; vertical-align: middle; }
 tbody tr:hover td { background: #161f21; }
 .cell-title { color: var(--text-primary); font-weight: 620; }
@@ -180,7 +184,8 @@ tbody tr:hover td { background: #161f21; }
 .badge { display: inline-flex; align-items: center; gap: .28rem; border: 1px solid #344043; border-radius: var(--radius-sm); padding: .24rem .42rem; background: #1d2729; color: var(--text-secondary); font-size: .61rem; font-weight: 650; line-height: 1; white-space: nowrap; }
 .badge.green { border-color: rgba(79, 154, 118, .28); background: var(--success-soft); color: #84bea0; }
 .badge.red { border-color: rgba(200, 101, 101, .28); background: var(--danger-soft); color: #d88888; }
-.badge.amber, .badge.accent { border-color: rgba(185, 130, 69, .32); background: var(--accent-soft); color: #d6a56d; }
+.badge.amber { border-color: rgba(198, 148, 79, .3); background: var(--warning-soft); color: #d7ad6b; }
+.badge.accent { border-color: rgba(196, 71, 91, .34); background: var(--accent-soft); color: #e98291; }
 .badge.blue { border-color: rgba(100, 143, 165, .28); background: var(--info-soft); color: #8fb4c5; }
 
 .catalog-table table { min-width: 1040px; }
@@ -236,7 +241,7 @@ tbody tr:hover td { background: #161f21; }
 .field.full { grid-column: 1 / -1; }
 .modal-footer { position: sticky; bottom: 0; display: flex; justify-content: flex-end; gap: .55rem; padding: .8rem 1rem; border-top: var(--border-default); background: var(--surface-1); }
 .line-editor { display: grid; grid-template-columns: 2fr .65fr .65fr .8fr 38px; gap: .42rem; align-items: end; margin-bottom: .52rem; }
-.notice { margin-bottom: 1rem; padding: .65rem .78rem; border-left: 2px solid var(--accent); border-radius: 0 var(--radius-md) var(--radius-md) 0; color: #ddb587; background: var(--accent-soft); font-size: .73rem; }
+.notice { margin-bottom: 1rem; padding: .65rem .78rem; border-left: 2px solid var(--accent); border-radius: 0 var(--radius-md) var(--radius-md) 0; color: #eda0ac; background: var(--accent-soft); font-size: .73rem; }
 .toast { position: fixed; z-index: 200; right: 1rem; bottom: 1rem; max-width: 360px; padding: .75rem .9rem; border: var(--border-default); border-left: 2px solid var(--accent); border-radius: var(--radius-md); background: #20292b; color: var(--text-primary); box-shadow: var(--shadow-lg); font-size: .74rem; }
 
 .mobile-header, .mobile-tabs { display: none; }

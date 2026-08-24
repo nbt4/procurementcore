@@ -4,7 +4,7 @@ ProcurementCore ist der Einkaufs-Service des Cores-Ökosystems. Er verbindet Bed
 
 ## Funktionsumfang
 
-- Tabellarischer Artikelkatalog mit bearbeitbaren Kategorien, visuellem Parameter-Editor und parameterbasierter Suche ohne JSON-Eingabe
+- Sortierbarer tabellarischer Artikelkatalog mit bearbeitbaren Kategorien, visuellem Parameter-Editor und parameterbasierter Suche ohne JSON-Eingabe
 - Sicheres Löschen ungenutzter Kategorien; verwendete Kategorien bleiben gegen Datenverlust geschützt
 - Artikelimport aus Produktlinks mit prüfbarer Vorschau, direkt editierbaren Kategorieparametern und automatischer Vorbelegung aus Schema.org/JSON-LD, OpenGraph sowie Adam-Hall-Shop-Produktdetails
 - Lieferantenstamm mit Preferred-Status, Konditionen, Lieferzeit, Bewertung und Risiko
@@ -18,7 +18,7 @@ ProcurementCore ist der Einkaufs-Service des Cores-Ökosystems. Er verbindet Bed
 
 ## Oberfläche
 
-Das Procurement-Theme folgt einer bewusst sachlichen „Einkaufsakte“-Richtung: Graphit- und Petrolschwarz bilden die Arbeitsfläche, ein gedämpfter Messington markiert ausschließlich aktive Navigation und primäre Aktionen. Flache Hierarchien, kompakte Tabellen, durchgehende Kennzahlen und eckige Statusmarker ersetzen dekorative Verläufe, Glows und austauschbare Kartenraster. Die Designregeln und Recherchebasis sind in [`docs/DESIGN.md`](docs/DESIGN.md) dokumentiert.
+Das Procurement-Theme folgt einer bewusst sachlichen „Einkaufsakte“-Richtung: Graphit- und Petrolschwarz bilden die Arbeitsfläche, ein gedecktes Karminrot markiert ausschließlich aktive Navigation und primäre Aktionen. Flache Hierarchien, kompakte Tabellen, durchgehende Kennzahlen und eckige Statusmarker ersetzen dekorative Verläufe, Glows und austauschbare Kartenraster. Die Designregeln und Recherchebasis sind in [`docs/DESIGN.md`](docs/DESIGN.md) dokumentiert.
 
 ## Entwicklung
 
