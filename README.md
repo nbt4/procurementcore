@@ -4,7 +4,7 @@ ProcurementCore ist der Einkaufs-Service des Cores-Ökosystems. Er verbindet Bed
 
 ## Funktionsumfang
 
-- Katalog mit bearbeitbaren Kategorien, visuellem Parameter-Editor und parameterbasierter Suche ohne JSON-Eingabe
+- Tabellarischer Artikelkatalog mit bearbeitbaren Kategorien, visuellem Parameter-Editor und parameterbasierter Suche ohne JSON-Eingabe
 - Sicheres Löschen ungenutzter Kategorien; verwendete Kategorien bleiben gegen Datenverlust geschützt
 - Artikelimport aus Produktlinks mit prüfbarer Vorschau, direkt editierbaren Kategorieparametern und automatischer Vorbelegung aus Schema.org/JSON-LD, OpenGraph sowie Adam-Hall-Shop-Produktdetails
 - Lieferantenstamm mit Preferred-Status, Konditionen, Lieferzeit, Bewertung und Risiko
