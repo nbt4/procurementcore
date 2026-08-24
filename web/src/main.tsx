@@ -5,4 +5,11 @@ import App from './App'
 import './theme.css'
 import './index.css'
 
+document.addEventListener('wheel', (event) => {
+  const target = event.target
+  if (target instanceof HTMLInputElement && target.type === 'number' && document.activeElement === target) {
+    target.blur()
+  }
+}, { capture: true, passive: true })
+
 createRoot(document.getElementById('root')!).render(<StrictMode><BrowserRouter><App /></BrowserRouter></StrictMode>)
