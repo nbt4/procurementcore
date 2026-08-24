@@ -17,10 +17,12 @@ CREATE TABLE IF NOT EXISTS proc_products (
     id BIGSERIAL PRIMARY KEY, sku VARCHAR(80) NOT NULL UNIQUE, name VARCHAR(240) NOT NULL,
     description TEXT, category_id BIGINT REFERENCES proc_categories(id), unit VARCHAR(30) DEFAULT 'Stk.',
     manufacturer VARCHAR(180), model VARCHAR(180), parameters JSONB NOT NULL DEFAULT '{}',
+    attributes JSONB NOT NULL DEFAULT '{}',
     active BOOLEAN NOT NULL DEFAULT TRUE, reorder_point DOUBLE PRECISION DEFAULT 0,
     target_stock DOUBLE PRECISION DEFAULT 0, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_proc_products_parameters ON proc_products USING GIN(parameters);
+CREATE INDEX IF NOT EXISTS idx_proc_products_attributes ON proc_products USING GIN(attributes);
 CREATE TABLE IF NOT EXISTS proc_offers (
     id BIGSERIAL PRIMARY KEY, product_id BIGINT NOT NULL REFERENCES proc_products(id), supplier_id BIGINT NOT NULL REFERENCES proc_suppliers(id),
     supplier_sku VARCHAR(120), price_cents BIGINT NOT NULL, currency VARCHAR(3) NOT NULL DEFAULT 'EUR',

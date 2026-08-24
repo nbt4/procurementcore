@@ -329,7 +329,7 @@ func (h *Handler) listProducts(w http.ResponseWriter, r *http.Request) {
 	query := h.db.Model(&models.Product{}).Preload("Category").Preload("Offers", "active = ?", true).Preload("Offers.Supplier")
 	if f.Query != "" {
 		like := "%" + f.Query + "%"
-		query = query.Where("proc_products.name ILIKE ? OR proc_products.sku ILIKE ? OR proc_products.description ILIKE ?", like, like, like)
+		query = query.Where("proc_products.name ILIKE ? OR proc_products.sku ILIKE ? OR proc_products.description ILIKE ? OR proc_products.manufacturer ILIKE ? OR proc_products.model ILIKE ? OR proc_products.attributes::text ILIKE ?", like, like, like, like, like, like)
 	}
 	if f.Manufacturer != "" {
 		query = query.Where("proc_products.manufacturer ILIKE ?", "%"+f.Manufacturer+"%")
@@ -391,6 +391,12 @@ func validateProduct(row *models.Product) string {
 	}
 	if !json.Valid(row.Parameters) {
 		return "Parameter sind kein gültiges JSON"
+	}
+	if len(row.Attributes) == 0 {
+		row.Attributes = json.RawMessage("{}")
+	}
+	if !json.Valid(row.Attributes) {
+		return "Attribute sind kein gültiges JSON"
 	}
 	if row.Unit == "" {
 		row.Unit = "Stk."

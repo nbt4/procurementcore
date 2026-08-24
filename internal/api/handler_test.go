@@ -1,8 +1,11 @@
 package api
 
 import (
+	"encoding/json"
 	"net/url"
 	"testing"
+
+	"procurementcore/internal/models"
 )
 
 func TestParseProductFilter(t *testing.T) {
@@ -27,5 +30,30 @@ func TestParseProductFilterIgnoresInvalidNumbers(t *testing.T) {
 	got := ParseProductFilter(url.Values{"categoryId": {"nope"}, "minPriceCents": {"x"}, "param": {" :x"}})
 	if got.CategoryID != 0 || got.MinPrice != nil || len(got.Parameters) != 0 {
 		t.Fatalf("invalid values should be ignored: %+v", got)
+	}
+}
+
+func TestValidateProductDefaultsIndependentAttributes(t *testing.T) {
+	product := models.Product{SKU: " test-1 ", Name: " Test product "}
+	if message := validateProduct(&product); message != "" {
+		t.Fatal(message)
+	}
+	if product.SKU != "TEST-1" || product.Name != "Test product" {
+		t.Fatalf("product identity was not normalized: %+v", product)
+	}
+	if string(product.Parameters) != "{}" || string(product.Attributes) != "{}" {
+		t.Fatalf("JSON fields were not initialized: parameters=%s attributes=%s", product.Parameters, product.Attributes)
+	}
+}
+
+func TestValidateProductRejectsInvalidIndependentAttributes(t *testing.T) {
+	product := models.Product{
+		SKU:        "TEST-1",
+		Name:       "Test product",
+		Parameters: json.RawMessage(`{}`),
+		Attributes: json.RawMessage(`{"EAN":`),
+	}
+	if message := validateProduct(&product); message != "Attribute sind kein gültiges JSON" {
+		t.Fatalf("unexpected validation result: %q", message)
 	}
 }
