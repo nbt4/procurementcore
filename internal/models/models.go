@@ -44,7 +44,7 @@ type Product struct {
 	Manufacturer string          `gorm:"size:180;index" json:"manufacturer"`
 	Model        string          `gorm:"size:180" json:"model"`
 	Parameters   json.RawMessage `gorm:"type:jsonb;default:'{}';index:,type:gin" json:"parameters"`
-	Attributes   json.RawMessage `gorm:"type:jsonb;default:'{}';index:,type:gin" json:"attributes"`
+	Attributes   json.RawMessage `gorm:"type:jsonb;not null;default:'{}';index:,type:gin" json:"attributes"`
 	Active       bool            `gorm:"default:true;index" json:"active"`
 	ReorderPoint float64         `json:"reorderPoint"`
 	TargetStock  float64         `json:"targetStock"`
