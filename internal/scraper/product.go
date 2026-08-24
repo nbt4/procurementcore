@@ -13,15 +13,23 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	xhtml "golang.org/x/net/html"
 )
 
 const (
-	maxPageMegabytes = 16
-	maxPageBytes     = maxPageMegabytes << 20
+	maxPageMegabytes  = 16
+	maxPageBytes      = maxPageMegabytes << 20
+	adamHallAPIBase   = "https://www.adamhall.com/shop/api/shopware"
+	adamHallCacheTime = 5 * time.Minute
 )
+
+type Options struct {
+	AdamHallUsername string
+	AdamHallPassword string
+}
 
 type ProductPreview struct {
 	Name         string            `json:"name"`
@@ -38,14 +46,32 @@ type ProductPreview struct {
 }
 
 type Fetcher struct {
-	client   *http.Client
-	resolver *net.Resolver
+	client           *http.Client
+	resolver         *net.Resolver
+	adamHallClient   *http.Client
+	adamHallBaseURL  string
+	adamHallUsername string
+	adamHallPassword string
+	adamHallMu       sync.Mutex
+	adamHallPrices   map[string]adamHallPrice
+	adamHallExpires  time.Time
 }
 
-func New() *Fetcher {
+type adamHallPrice struct {
+	Cents    int64
+	Currency string
+	Found    bool
+}
+
+func New(options Options) *Fetcher {
 	resolver := net.DefaultResolver
 	dialer := &net.Dialer{Timeout: 6 * time.Second, KeepAlive: 30 * time.Second}
-	fetcher := &Fetcher{resolver: resolver}
+	fetcher := &Fetcher{
+		resolver:         resolver,
+		adamHallBaseURL:  adamHallAPIBase,
+		adamHallUsername: options.AdamHallUsername,
+		adamHallPassword: options.AdamHallPassword,
+	}
 	transport := &http.Transport{
 		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
 			host, port, err := net.SplitHostPort(address)
@@ -70,6 +96,13 @@ func New() *Fetcher {
 				return errors.New("zu viele Weiterleitungen")
 			}
 			return fetcher.validateURL(req.Context(), req.URL)
+		},
+	}
+	fetcher.adamHallClient = &http.Client{
+		Transport: transport,
+		Timeout:   12 * time.Second,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
 		},
 	}
 	return fetcher
@@ -106,7 +139,145 @@ func (f *Fetcher) Scrape(ctx context.Context, rawURL string) (ProductPreview, er
 	if err != nil {
 		return ProductPreview{}, errors.New("Produktseite konnte nicht gelesen werden")
 	}
-	return parseDownloadedPage(body, response.Request.URL, maxPageBytes)
+	preview, err := parseDownloadedPage(body, response.Request.URL, maxPageBytes)
+	if err != nil {
+		return ProductPreview{}, err
+	}
+	if isAdamHallHost(response.Request.URL.Hostname()) && f.adamHallUsername != "" && preview.SKU != "" {
+		price, err := f.adamHallPrice(ctx, preview.SKU)
+		if err != nil {
+			return ProductPreview{}, err
+		}
+		if price.Found {
+			preview.PriceCents = price.Cents
+			preview.Currency = price.Currency
+			preview.Source = "Adam Hall Shop/HTML+Preisliste"
+		}
+	}
+	return preview, nil
+}
+
+func (f *Fetcher) adamHallPrice(ctx context.Context, sku string) (adamHallPrice, error) {
+	f.adamHallMu.Lock()
+	defer f.adamHallMu.Unlock()
+
+	if f.adamHallPrices == nil || !time.Now().Before(f.adamHallExpires) {
+		prices, expires, err := f.downloadAdamHallPrices(ctx)
+		if err != nil {
+			return adamHallPrice{}, err
+		}
+		f.adamHallPrices, f.adamHallExpires = prices, expires
+	}
+	for productNumber, price := range f.adamHallPrices {
+		if strings.EqualFold(productNumber, sku) {
+			return price, nil
+		}
+	}
+	return adamHallPrice{}, nil
+}
+
+func (f *Fetcher) downloadAdamHallPrices(ctx context.Context) (map[string]adamHallPrice, time.Time, error) {
+	contextToken, err := f.loginAdamHall(ctx)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, f.adamHallBaseURL+"/pricelist", nil)
+	if err != nil {
+		return nil, time.Time{}, errors.New("Adam-Hall-Preisdienst konnte nicht aufgerufen werden")
+	}
+	setAdamHallHeaders(req)
+	req.Header.Set("sw-context-token", contextToken)
+	response, err := f.adamHallClient.Do(req)
+	if err != nil {
+		return nil, time.Time{}, errors.New("Adam-Hall-Preisliste konnte nicht abgerufen werden")
+	}
+	defer response.Body.Close()
+	if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
+		return nil, time.Time{}, errors.New("Adam-Hall-Sitzung wurde abgelehnt")
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil, time.Time{}, fmt.Errorf("Adam-Hall-Preisdienst antwortet mit HTTP %d", response.StatusCode)
+	}
+
+	var payload struct {
+		Success         bool                      `json:"success"`
+		ExpiredDateTime string                    `json:"expiredDateTime"`
+		Currency        any                       `json:"currency"`
+		Articles        map[string]map[string]any `json:"articles"`
+	}
+	decoder := json.NewDecoder(io.LimitReader(response.Body, maxPageBytes))
+	decoder.UseNumber()
+	if err := decoder.Decode(&payload); err != nil || !payload.Success {
+		return nil, time.Time{}, errors.New("Adam-Hall-Preisliste enthält keine gültigen Daten")
+	}
+
+	prices := make(map[string]adamHallPrice, len(payload.Articles))
+	for productNumber, article := range payload.Articles {
+		if unavailable, _ := article["unbuyable"].(bool); unavailable {
+			continue
+		}
+		value := valueString(article["price"])
+		cents := priceCents(value)
+		if value == "" || cents <= 0 {
+			continue
+		}
+		prices[productNumber] = adamHallPrice{
+			Cents:    cents,
+			Currency: strings.ToUpper(first(valueString(article["currency"]), valueString(payload.Currency), "EUR")),
+			Found:    true,
+		}
+	}
+	expires := time.Now().Add(adamHallCacheTime)
+	if parsed, err := time.Parse(time.RFC3339, payload.ExpiredDateTime); err == nil && parsed.After(time.Now()) {
+		expires = parsed
+	}
+	return prices, expires, nil
+}
+
+func (f *Fetcher) loginAdamHall(ctx context.Context) (string, error) {
+	body, err := json.Marshal(map[string]string{
+		"username": f.adamHallUsername,
+		"password": f.adamHallPassword,
+	})
+	if err != nil {
+		return "", errors.New("Adam-Hall-Anmeldung konnte nicht vorbereitet werden")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, f.adamHallBaseURL+"/account/login", strings.NewReader(string(body)))
+	if err != nil {
+		return "", errors.New("Adam-Hall-Anmeldung konnte nicht vorbereitet werden")
+	}
+	setAdamHallHeaders(req)
+	req.Header.Set("Content-Type", "application/json")
+	response, err := f.adamHallClient.Do(req)
+	if err != nil {
+		return "", errors.New("Adam-Hall-Anmeldung konnte nicht durchgeführt werden")
+	}
+	defer response.Body.Close()
+	if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
+		return "", errors.New("Adam-Hall-Anmeldung ist fehlgeschlagen")
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return "", fmt.Errorf("Adam-Hall-Anmeldung antwortet mit HTTP %d", response.StatusCode)
+	}
+
+	var payload struct {
+		ContextToken string `json:"contextToken"`
+		Token        string `json:"token"`
+	}
+	if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&payload); err != nil {
+		return "", errors.New("Adam-Hall-Anmeldung liefert keine gültige Sitzung")
+	}
+	token := first(response.Header.Get("sw-context-token"), payload.ContextToken, payload.Token)
+	if token == "" {
+		return "", errors.New("Adam-Hall-Anmeldung liefert keine gültige Sitzung")
+	}
+	return token, nil
+}
+
+func setAdamHallHeaders(req *http.Request) {
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "ProcurementCore Product Import/1.0")
+	req.Header.Set("sw-access-key", "proxy")
 }
 
 func parseDownloadedPage(body []byte, sourceURL *url.URL, limit int) (ProductPreview, error) {

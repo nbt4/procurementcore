@@ -17,12 +17,13 @@ import (
 	"procurementcore/internal/auth"
 	"procurementcore/internal/config"
 	"procurementcore/internal/database"
+	"procurementcore/internal/scraper"
 
 	commonbranding "github.com/nbt4/cores-common/pkg/branding"
 	"github.com/rs/zerolog"
 )
 
-const version = "1.0.7"
+const version = "1.0.8"
 
 //go:embed all:dist
 var frontend embed.FS
@@ -57,7 +58,11 @@ func main() {
 	mux.HandleFunc("GET /api/v1/branding", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, http.StatusOK, branding.GetConfig()) })
 	mux.HandleFunc("POST /api/v1/auth/logout", logoutHandler(cfg.CookieDomain))
 	mux.Handle("/logos/", http.StripPrefix("/logos/", http.FileServer(http.Dir("/var/lib/branding/logos"))))
-	mux.Handle("/api/v1/", http.StripPrefix("/api/v1", auth.Middleware(api.NewHandler(db).Routes())))
+	productScraper := scraper.New(scraper.Options{
+		AdamHallUsername: cfg.AdamHallUsername,
+		AdamHallPassword: cfg.AdamHallPassword,
+	})
+	mux.Handle("/api/v1/", http.StripPrefix("/api/v1", auth.Middleware(api.NewHandler(db, productScraper).Routes())))
 
 	dist, err := fs.Sub(frontend, "dist")
 	if err != nil {

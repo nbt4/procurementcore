@@ -1,10 +1,15 @@
 package scraper
 
 import (
+	"encoding/json"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestParseHTMLUsesJSONLDProduct(t *testing.T) {
@@ -103,6 +108,76 @@ func TestParseHTMLDoesNotApplyAdamHallMarkupToOtherHosts(t *testing.T) {
 	}
 	if preview.Name != "Original title" || preview.SKU != "" || preview.Source != "OpenGraph/HTML" {
 		t.Fatalf("Adam Hall parser leaked into another host: %+v", preview)
+	}
+}
+
+func TestAdamHallPriceUsesAuthenticatedPricelistAndCache(t *testing.T) {
+	var loginCalls, priceCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/account/login":
+			loginCalls.Add(1)
+			var credentials map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&credentials); err != nil {
+				t.Fatal(err)
+			}
+			if credentials["username"] != "buyer@example.com" || credentials["password"] != "shop-secret" {
+				t.Fatal("unexpected credentials")
+			}
+			_ = json.NewEncoder(w).Encode(map[string]string{"contextToken": "authenticated-context"})
+		case "/pricelist":
+			priceCalls.Add(1)
+			if r.Header.Get("sw-context-token") != "authenticated-context" {
+				t.Fatal("missing authenticated context")
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"success":         true,
+				"expiredDateTime": time.Now().Add(time.Hour).Format(time.RFC3339),
+				"currency":        "EUR",
+				"articles": map[string]any{
+					"8747X6": map[string]any{"price": 12.345},
+				},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	fetcher := &Fetcher{
+		adamHallClient:   server.Client(),
+		adamHallBaseURL:  server.URL,
+		adamHallUsername: "buyer@example.com",
+		adamHallPassword: "shop-secret",
+	}
+	for range 2 {
+		price, err := fetcher.adamHallPrice(t.Context(), "8747x6")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !price.Found || price.Cents != 1235 || price.Currency != "EUR" {
+			t.Fatalf("unexpected price: %+v", price)
+		}
+	}
+	if loginCalls.Load() != 1 || priceCalls.Load() != 1 {
+		t.Fatalf("expected cached pricelist, got %d logins and %d price calls", loginCalls.Load(), priceCalls.Load())
+	}
+}
+
+func TestAdamHallPriceReportsRejectedLogin(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer server.Close()
+	fetcher := &Fetcher{
+		adamHallClient:   server.Client(),
+		adamHallBaseURL:  server.URL,
+		adamHallUsername: "buyer@example.com",
+		adamHallPassword: "wrong-secret",
+	}
+
+	if _, err := fetcher.adamHallPrice(t.Context(), "8747X6"); err == nil || !strings.Contains(err.Error(), "Anmeldung") {
+		t.Fatalf("expected a login error, got %v", err)
 	}
 }
 

@@ -24,7 +24,9 @@ type Handler struct {
 	scraper *scraper.Fetcher
 }
 
-func NewHandler(db *gorm.DB) *Handler { return &Handler{db: db, scraper: scraper.New()} }
+func NewHandler(db *gorm.DB, productScraper *scraper.Fetcher) *Handler {
+	return &Handler{db: db, scraper: productScraper}
+}
 
 func (h *Handler) Routes() http.Handler {
 	r := chi.NewRouter()
