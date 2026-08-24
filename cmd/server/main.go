@@ -23,7 +23,7 @@ import (
 	"github.com/rs/zerolog"
 )
 
-const version = "1.0.8"
+const version = "1.0.9"
 
 //go:embed all:dist
 var frontend embed.FS

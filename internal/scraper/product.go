@@ -2,6 +2,9 @@ package scraper
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +13,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"strconv"
 	"strings"
@@ -235,22 +239,220 @@ func (f *Fetcher) downloadAdamHallPrices(ctx context.Context) (map[string]adamHa
 }
 
 func (f *Fetcher) loginAdamHall(ctx context.Context) (string, error) {
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		return "", errors.New("Adam-Hall-Anmeldung konnte nicht vorbereitet werden")
+	}
+	client := *f.adamHallClient
+	client.Jar = jar
+	client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
+
+	contextToken, err := f.newAdamHallContext(ctx, &client)
+	if err != nil {
+		return "", err
+	}
+	loginURL, err := f.adamHallLoginURL(ctx, &client, contextToken)
+	if err != nil {
+		return "", err
+	}
+
+	verifier, challenge, err := newPKCEPair()
+	if err != nil {
+		return "", errors.New("Adam-Hall-Anmeldung konnte nicht vorbereitet werden")
+	}
+	query := loginURL.Query()
+	query.Set("code_challenge", challenge)
+	query.Set("code_challenge_method", "S256")
+	loginURL.RawQuery = query.Encode()
+
+	settings, err := f.loadAdamHallAuthorization(ctx, &client, loginURL)
+	if err != nil {
+		return "", err
+	}
+	code, redirectURI, err := f.submitAdamHallAuthorization(ctx, &client, loginURL, settings)
+	if err != nil {
+		return "", err
+	}
+	return f.exchangeAdamHallCode(ctx, &client, contextToken, code, verifier, redirectURI)
+}
+
+func (f *Fetcher) newAdamHallContext(ctx context.Context, client *http.Client) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, f.adamHallBaseURL+"/context", nil)
+	if err != nil {
+		return "", errors.New("Adam-Hall-Anmeldung konnte nicht vorbereitet werden")
+	}
+	setAdamHallHeaders(req)
+	response, err := client.Do(req)
+	if err != nil {
+		return "", errors.New("Adam-Hall-Sitzung konnte nicht gestartet werden")
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return "", fmt.Errorf("Adam-Hall-Sitzung antwortet mit HTTP %d", response.StatusCode)
+	}
+	token := response.Header.Get("sw-context-token")
+	if token == "" {
+		return "", errors.New("Adam-Hall-Sitzung liefert keinen Kontext")
+	}
+	return token, nil
+}
+
+func (f *Fetcher) adamHallLoginURL(ctx context.Context, client *http.Client, contextToken string) (*url.URL, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, f.adamHallBaseURL+"/azure/urls", nil)
+	if err != nil {
+		return nil, errors.New("Adam-Hall-Anmeldung konnte nicht vorbereitet werden")
+	}
+	setAdamHallHeaders(req)
+	req.Header.Set("sw-context-token", contextToken)
+	response, err := client.Do(req)
+	if err != nil {
+		return nil, errors.New("Adam-Hall-Anmeldedienst konnte nicht aufgerufen werden")
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil, fmt.Errorf("Adam-Hall-Anmeldedienst antwortet mit HTTP %d", response.StatusCode)
+	}
+	var payload struct {
+		LoginURL string `json:"loginUrl"`
+	}
+	if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&payload); err != nil {
+		return nil, errors.New("Adam-Hall-Anmeldedienst liefert keine gültige URL")
+	}
+	loginURL, err := url.Parse(payload.LoginURL)
+	if err != nil || loginURL.Scheme != "https" || !f.allowedAdamHallIdentityHost(loginURL.Hostname()) {
+		return nil, errors.New("Adam-Hall-Anmeldedienst liefert keine zulässige URL")
+	}
+	return loginURL, nil
+}
+
+type adamHallAuthorizationSettings struct {
+	CSRF    string `json:"csrf"`
+	TransID string `json:"transId"`
+	Hosts   struct {
+		Tenant string `json:"tenant"`
+		Policy string `json:"policy"`
+	} `json:"hosts"`
+}
+
+func (f *Fetcher) loadAdamHallAuthorization(ctx context.Context, client *http.Client, loginURL *url.URL) (adamHallAuthorizationSettings, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, loginURL.String(), nil)
+	if err != nil {
+		return adamHallAuthorizationSettings{}, errors.New("Adam-Hall-Anmeldung konnte nicht vorbereitet werden")
+	}
+	req.Header.Set("Accept", "text/html,application/xhtml+xml")
+	req.Header.Set("User-Agent", "Mozilla/5.0 ProcurementCore/1.0")
+	response, err := client.Do(req)
+	if err != nil {
+		return adamHallAuthorizationSettings{}, errors.New("Adam-Hall-Anmeldung konnte nicht geöffnet werden")
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return adamHallAuthorizationSettings{}, fmt.Errorf("Adam-Hall-Anmeldung antwortet mit HTTP %d", response.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+	if err != nil {
+		return adamHallAuthorizationSettings{}, errors.New("Adam-Hall-Anmeldung konnte nicht gelesen werden")
+	}
+	const prefix = "var SETTINGS = "
+	start := strings.Index(string(body), prefix)
+	if start < 0 {
+		return adamHallAuthorizationSettings{}, errors.New("Adam-Hall-Anmeldung liefert keine PKCE-Konfiguration")
+	}
+	settingsJSON := string(body[start+len(prefix):])
+	end := strings.Index(settingsJSON, ";")
+	if end < 0 {
+		return adamHallAuthorizationSettings{}, errors.New("Adam-Hall-Anmeldung liefert keine PKCE-Konfiguration")
+	}
+	var settings adamHallAuthorizationSettings
+	if err := json.Unmarshal([]byte(settingsJSON[:end]), &settings); err != nil || settings.CSRF == "" || settings.TransID == "" || settings.Hosts.Tenant == "" || settings.Hosts.Policy == "" {
+		return adamHallAuthorizationSettings{}, errors.New("Adam-Hall-Anmeldung liefert keine gültige PKCE-Konfiguration")
+	}
+	return settings, nil
+}
+
+func (f *Fetcher) submitAdamHallAuthorization(ctx context.Context, client *http.Client, loginURL *url.URL, settings adamHallAuthorizationSettings) (string, string, error) {
+	identityBase := &url.URL{Scheme: loginURL.Scheme, Host: loginURL.Host}
+	selfAsserted := identityBase.ResolveReference(&url.URL{Path: strings.TrimSuffix(settings.Hosts.Tenant, "/") + "/SelfAsserted"})
+	query := selfAsserted.Query()
+	query.Set("tx", settings.TransID)
+	query.Set("p", settings.Hosts.Policy)
+	selfAsserted.RawQuery = query.Encode()
+	form := url.Values{"email": {f.adamHallUsername}, "password": {f.adamHallPassword}, "request_type": {"RESPONSE"}}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, selfAsserted.String(), strings.NewReader(form.Encode()))
+	if err != nil {
+		return "", "", errors.New("Adam-Hall-Anmeldung konnte nicht vorbereitet werden")
+	}
+	req.Header.Set("Accept", "application/json, text/javascript, */*; q=0.01")
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+	req.Header.Set("User-Agent", "Mozilla/5.0 ProcurementCore/1.0")
+	req.Header.Set("X-CSRF-TOKEN", settings.CSRF)
+	req.Header.Set("X-Requested-With", "XMLHttpRequest")
+	req.Header.Set("Referer", loginURL.String())
+	response, err := client.Do(req)
+	if err != nil {
+		return "", "", errors.New("Adam-Hall-Anmeldung konnte nicht durchgeführt werden")
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+	if err != nil || response.StatusCode < 200 || response.StatusCode >= 300 || !adamHallAuthorizationAccepted(body) {
+		return "", "", errors.New("Adam-Hall-Anmeldung ist fehlgeschlagen")
+	}
+
+	confirmed := identityBase.ResolveReference(&url.URL{Path: strings.TrimSuffix(settings.Hosts.Tenant, "/") + "/api/CombinedSigninAndSignup/confirmed"})
+	query = confirmed.Query()
+	query.Set("csrf_token", settings.CSRF)
+	query.Set("tx", settings.TransID)
+	query.Set("p", settings.Hosts.Policy)
+	query.Set("rememberMe", "false")
+	confirmed.RawQuery = query.Encode()
+	req, err = http.NewRequestWithContext(ctx, http.MethodGet, confirmed.String(), nil)
+	if err != nil {
+		return "", "", errors.New("Adam-Hall-Anmeldung konnte nicht abgeschlossen werden")
+	}
+	req.Header.Set("Accept", "text/html,application/xhtml+xml")
+	req.Header.Set("User-Agent", "Mozilla/5.0 ProcurementCore/1.0")
+	req.Header.Set("Referer", loginURL.String())
+	response, err = client.Do(req)
+	if err != nil {
+		return "", "", errors.New("Adam-Hall-Anmeldung konnte nicht abgeschlossen werden")
+	}
+	response.Body.Close()
+	if response.StatusCode < 300 || response.StatusCode >= 400 {
+		return "", "", errors.New("Adam-Hall-Anmeldung liefert keinen Autorisierungscode")
+	}
+	callback, err := response.Location()
+	if err != nil || callback.Hostname() == "" || !f.allowedAdamHallCallback(callback) {
+		return "", "", errors.New("Adam-Hall-Anmeldung liefert keine zulässige Rücksprungadresse")
+	}
+	code := callback.Query().Get("code")
+	if code == "" {
+		return "", "", errors.New("Adam-Hall-Anmeldung liefert keinen Autorisierungscode")
+	}
+	callback.RawQuery = ""
+	callback.Fragment = ""
+	return code, callback.String(), nil
+}
+
+func (f *Fetcher) exchangeAdamHallCode(ctx context.Context, client *http.Client, contextToken, code, verifier, redirectURI string) (string, error) {
 	body, err := json.Marshal(map[string]string{
-		"username": f.adamHallUsername,
-		"password": f.adamHallPassword,
+		"code":          code,
+		"code_verifier": verifier,
+		"redirect_uri":  redirectURI,
+		"returnUrl":     "de",
 	})
 	if err != nil {
 		return "", errors.New("Adam-Hall-Anmeldung konnte nicht vorbereitet werden")
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, f.adamHallBaseURL+"/account/login", strings.NewReader(string(body)))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, f.adamHallBaseURL+"/customer/login?state", strings.NewReader(string(body)))
 	if err != nil {
 		return "", errors.New("Adam-Hall-Anmeldung konnte nicht vorbereitet werden")
 	}
 	setAdamHallHeaders(req)
 	req.Header.Set("Content-Type", "application/json")
-	response, err := f.adamHallClient.Do(req)
+	req.Header.Set("sw-context-token", contextToken)
+	response, err := client.Do(req)
 	if err != nil {
-		return "", errors.New("Adam-Hall-Anmeldung konnte nicht durchgeführt werden")
+		return "", errors.New("Adam-Hall-Autorisierungscode konnte nicht eingelöst werden")
 	}
 	defer response.Body.Close()
 	if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
@@ -259,19 +461,47 @@ func (f *Fetcher) loginAdamHall(ctx context.Context) (string, error) {
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return "", fmt.Errorf("Adam-Hall-Anmeldung antwortet mit HTTP %d", response.StatusCode)
 	}
-
-	var payload struct {
-		ContextToken string `json:"contextToken"`
-		Token        string `json:"token"`
-	}
-	if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&payload); err != nil {
-		return "", errors.New("Adam-Hall-Anmeldung liefert keine gültige Sitzung")
-	}
-	token := first(response.Header.Get("sw-context-token"), payload.ContextToken, payload.Token)
+	token := response.Header.Get("sw-context-token")
 	if token == "" {
 		return "", errors.New("Adam-Hall-Anmeldung liefert keine gültige Sitzung")
 	}
 	return token, nil
+}
+
+func newPKCEPair() (string, string, error) {
+	random := make([]byte, 48)
+	if _, err := rand.Read(random); err != nil {
+		return "", "", err
+	}
+	verifier := base64.RawURLEncoding.EncodeToString(random)
+	digest := sha256.Sum256([]byte(verifier))
+	return verifier, base64.RawURLEncoding.EncodeToString(digest[:]), nil
+}
+
+func adamHallAuthorizationAccepted(body []byte) bool {
+	var payload struct {
+		Status any `json:"status"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return false
+	}
+	return valueString(payload.Status) == "200"
+}
+
+func (f *Fetcher) allowedAdamHallIdentityHost(host string) bool {
+	base, err := url.Parse(f.adamHallBaseURL)
+	if err == nil && strings.EqualFold(host, base.Hostname()) {
+		return true
+	}
+	return strings.EqualFold(host, "ahgb2c.b2clogin.com")
+}
+
+func (f *Fetcher) allowedAdamHallCallback(callback *url.URL) bool {
+	base, err := url.Parse(f.adamHallBaseURL)
+	if err != nil || callback.Scheme != base.Scheme || !strings.EqualFold(callback.Host, base.Host) {
+		return false
+	}
+	return strings.HasPrefix(callback.Path, "/shop/") && strings.HasSuffix(callback.Path, "/customer/authorize")
 }
 
 func setAdamHallHeaders(req *http.Request) {

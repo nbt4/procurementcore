@@ -1,11 +1,14 @@
 package scraper
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -113,18 +116,60 @@ func TestParseHTMLDoesNotApplyAdamHallMarkupToOtherHosts(t *testing.T) {
 
 func TestAdamHallPriceUsesAuthenticatedPricelistAndCache(t *testing.T) {
 	var loginCalls, priceCalls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	var server *httptest.Server
+	var expectedChallenge string
+	server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/account/login":
+		case "/context":
+			w.Header().Set("sw-context-token", "guest-context")
+			_ = json.NewEncoder(w).Encode(map[string]any{"token": "guest-context"})
+		case "/azure/urls":
+			if r.Header.Get("sw-context-token") != "guest-context" {
+				t.Fatal("missing guest context")
+			}
+			loginURL := server.URL + "/oauth/authorize?redirect_uri=" + url.QueryEscape(server.URL+"/shop/en/customer/authorize")
+			_ = json.NewEncoder(w).Encode(map[string]string{"loginUrl": loginURL})
+		case "/oauth/authorize":
+			expectedChallenge = r.URL.Query().Get("code_challenge")
+			if expectedChallenge == "" || r.URL.Query().Get("code_challenge_method") != "S256" {
+				t.Fatal("missing PKCE challenge")
+			}
+			http.SetCookie(w, &http.Cookie{Name: "b2c-session", Value: "active", Path: "/"})
+			_, _ = w.Write([]byte(`<!doctype html><script>var SETTINGS = {"csrf":"csrf-value","transId":"transaction-value","hosts":{"tenant":"/tenant/policy","policy":"test-policy"}};</script>`))
+		case "/tenant/policy/SelfAsserted":
 			loginCalls.Add(1)
-			var credentials map[string]string
-			if err := json.NewDecoder(r.Body).Decode(&credentials); err != nil {
+			if cookie, err := r.Cookie("b2c-session"); err != nil || cookie.Value != "active" {
+				t.Fatal("missing B2C cookie")
+			}
+			if r.Header.Get("X-CSRF-TOKEN") != "csrf-value" || r.URL.Query().Get("tx") != "transaction-value" {
+				t.Fatal("missing B2C authorization data")
+			}
+			if err := r.ParseForm(); err != nil {
 				t.Fatal(err)
 			}
-			if credentials["username"] != "buyer@example.com" || credentials["password"] != "shop-secret" {
+			if r.Form.Get("email") != "buyer@example.com" || r.Form.Get("password") != "shop-secret" || r.Form.Get("request_type") != "RESPONSE" {
 				t.Fatal("unexpected credentials")
 			}
-			_ = json.NewEncoder(w).Encode(map[string]string{"contextToken": "authenticated-context"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"status": "200"})
+		case "/tenant/policy/api/CombinedSigninAndSignup/confirmed":
+			if r.URL.Query().Get("csrf_token") != "csrf-value" || r.URL.Query().Get("p") != "test-policy" {
+				t.Fatal("missing B2C confirmation data")
+			}
+			http.Redirect(w, r, server.URL+"/shop/en/customer/authorize?code=authorization-code", http.StatusFound)
+		case "/customer/login":
+			if r.URL.RawQuery != "state" || r.Header.Get("sw-context-token") != "guest-context" {
+				t.Fatal("missing Shopware login state")
+			}
+			var exchange map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&exchange); err != nil {
+				t.Fatal(err)
+			}
+			digest := sha256.Sum256([]byte(exchange["code_verifier"]))
+			if exchange["code"] != "authorization-code" || exchange["redirect_uri"] != server.URL+"/shop/en/customer/authorize" || base64.RawURLEncoding.EncodeToString(digest[:]) != expectedChallenge {
+				t.Fatal("invalid authorization-code exchange")
+			}
+			w.Header().Set("sw-context-token", "authenticated-context")
+			_ = json.NewEncoder(w).Encode(map[string]string{"redirectUrl": "en"})
 		case "/pricelist":
 			priceCalls.Add(1)
 			if r.Header.Get("sw-context-token") != "authenticated-context" {
@@ -165,8 +210,20 @@ func TestAdamHallPriceUsesAuthenticatedPricelistAndCache(t *testing.T) {
 }
 
 func TestAdamHallPriceReportsRejectedLogin(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
+	var server *httptest.Server
+	server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/context":
+			w.Header().Set("sw-context-token", "guest-context")
+		case "/azure/urls":
+			_ = json.NewEncoder(w).Encode(map[string]string{"loginUrl": server.URL + "/oauth/authorize"})
+		case "/oauth/authorize":
+			_, _ = w.Write([]byte(`<script>var SETTINGS = {"csrf":"csrf-value","transId":"transaction-value","hosts":{"tenant":"/tenant/policy","policy":"test-policy"}};</script>`))
+		case "/tenant/policy/SelfAsserted":
+			_ = json.NewEncoder(w).Encode(map[string]string{"status": "400"})
+		default:
+			http.NotFound(w, r)
+		}
 	}))
 	defer server.Close()
 	fetcher := &Fetcher{
@@ -178,6 +235,23 @@ func TestAdamHallPriceReportsRejectedLogin(t *testing.T) {
 
 	if _, err := fetcher.adamHallPrice(t.Context(), "8747X6"); err == nil || !strings.Contains(err.Error(), "Anmeldung") {
 		t.Fatalf("expected a login error, got %v", err)
+	}
+}
+
+func TestAdamHallLivePrice(t *testing.T) {
+	if os.Getenv("ADAMHALL_LIVE_TEST") != "1" {
+		t.Skip("set ADAMHALL_LIVE_TEST=1 to test the live account-price flow")
+	}
+	fetcher := New(Options{
+		AdamHallUsername: os.Getenv("ADAMHALL_USERNAME"),
+		AdamHallPassword: os.Getenv("ADAMHALL_PASSWORD"),
+	})
+	preview, err := fetcher.Scrape(t.Context(), "https://www.adamhall.com/shop/de/ready-made-cables/pdu-6-8747x6")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.SKU != "8747X6" || preview.PriceCents <= 0 || preview.Currency != "EUR" {
+		t.Fatalf("unexpected live Adam Hall preview: %+v", preview)
 	}
 }
 
