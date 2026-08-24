@@ -233,6 +233,9 @@ func ParseHTML(reader io.Reader, sourceURL *url.URL) (ProductPreview, error) {
 	if preview.Source != "JSON-LD" {
 		preview.Currency = strings.ToUpper(first(meta["product:price:currency"], meta["pricecurrency"], preview.Currency, "EUR"))
 	}
+	if isAdamHallHost(sourceURL.Hostname()) {
+		applyAdamHallPage(&preview, document)
+	}
 	if preview.Source == "" && preview.Name != "" {
 		preview.Source = "OpenGraph/HTML"
 	}
@@ -243,6 +246,146 @@ func ParseHTML(reader io.Reader, sourceURL *url.URL) (ProductPreview, error) {
 		return ProductPreview{}, errors.New("auf der Seite wurden keine erkennbaren Produktdaten gefunden")
 	}
 	return preview, nil
+}
+
+func isAdamHallHost(host string) bool {
+	host = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
+	return host == "adamhall.com" || strings.HasSuffix(host, ".adamhall.com")
+}
+
+func applyAdamHallPage(preview *ProductPreview, document *xhtml.Node) {
+	buyBox := findElement(document, func(node *xhtml.Node) bool {
+		return attribute(node, "data-testid") == "cms-element-buy-box"
+	})
+	if buyBox == nil {
+		return
+	}
+
+	if heading := findElement(buyBox, func(node *xhtml.Node) bool { return node.Data == "h1" }); heading != nil {
+		preview.Name = nodeText(heading)
+		if preview.Model == "" {
+			preview.Model = preview.Name
+		}
+	}
+	if brand := findElement(buyBox, func(node *xhtml.Node) bool {
+		return node.Data == "a" && strings.Contains(attribute(node, "href"), "/marken/")
+	}); brand != nil && preview.Manufacturer == "" {
+		preview.Manufacturer = first(attribute(brand, "title"), nodeText(brand))
+	}
+
+	forEachElement(buyBox, func(node *xhtml.Node) {
+		if node.Data != "strong" || node.Parent == nil {
+			return
+		}
+		labelText := nodeText(node)
+		label := strings.TrimSpace(strings.TrimSuffix(labelText, ":"))
+		value := strings.TrimSpace(strings.TrimPrefix(nodeText(node.Parent), labelText))
+		if label == "" || value == "" {
+			return
+		}
+		switch strings.ToLower(label) {
+		case "artikel nr.", "artikelnummer", "article no.", "article number":
+			if preview.SKU == "" {
+				preview.SKU = value
+			}
+		default:
+			preview.Attributes[label] = value
+		}
+	})
+
+	specifications := findElement(document, func(node *xhtml.Node) bool {
+		return attribute(node, "id") == "product-specifications"
+	})
+	forEachElement(specifications, func(node *xhtml.Node) {
+		if node.Data != "div" || !hasClass(node, "font-bold") {
+			return
+		}
+		valueNode := nextElementSibling(node)
+		if valueNode == nil || valueNode.Data != "div" {
+			return
+		}
+		name, value := nodeText(node), nodeText(valueNode)
+		if name != "" && value != "" {
+			preview.Attributes[name] = value
+		}
+	})
+	preview.Source = "Adam Hall Shop/HTML"
+}
+
+func findElement(root *xhtml.Node, matches func(*xhtml.Node) bool) *xhtml.Node {
+	if root == nil {
+		return nil
+	}
+	if root.Type == xhtml.ElementNode && matches(root) {
+		return root
+	}
+	for child := root.FirstChild; child != nil; child = child.NextSibling {
+		if match := findElement(child, matches); match != nil {
+			return match
+		}
+	}
+	return nil
+}
+
+func forEachElement(root *xhtml.Node, visit func(*xhtml.Node)) {
+	if root == nil {
+		return
+	}
+	if root.Type == xhtml.ElementNode {
+		visit(root)
+	}
+	for child := root.FirstChild; child != nil; child = child.NextSibling {
+		forEachElement(child, visit)
+	}
+}
+
+func nextElementSibling(node *xhtml.Node) *xhtml.Node {
+	for sibling := node.NextSibling; sibling != nil; sibling = sibling.NextSibling {
+		if sibling.Type == xhtml.ElementNode {
+			return sibling
+		}
+	}
+	return nil
+}
+
+func attribute(node *xhtml.Node, name string) string {
+	if node == nil {
+		return ""
+	}
+	for _, item := range node.Attr {
+		if strings.EqualFold(item.Key, name) {
+			return strings.TrimSpace(item.Val)
+		}
+	}
+	return ""
+}
+
+func hasClass(node *xhtml.Node, class string) bool {
+	for _, value := range strings.Fields(attribute(node, "class")) {
+		if value == class {
+			return true
+		}
+	}
+	return false
+}
+
+func nodeText(node *xhtml.Node) string {
+	if node == nil {
+		return ""
+	}
+	var value strings.Builder
+	var walk func(*xhtml.Node)
+	walk = func(current *xhtml.Node) {
+		if current.Type == xhtml.TextNode {
+			value.WriteString(" ")
+			value.WriteString(current.Data)
+		}
+		for child := current.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(node)
+	return cleanText(value.String())
 }
 
 func findProduct(value any) map[string]any {

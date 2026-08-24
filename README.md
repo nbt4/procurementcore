@@ -6,7 +6,7 @@ ProcurementCore ist der Einkaufs-Service des Cores-Ökosystems. Er verbindet Bed
 
 - Katalog mit bearbeitbaren Kategorien, visuellem Parameter-Editor und parameterbasierter Suche ohne JSON-Eingabe
 - Sicheres Löschen ungenutzter Kategorien; verwendete Kategorien bleiben gegen Datenverlust geschützt
-- Artikelimport aus Produktlinks mit prüfbarer Vorschau, direkt editierbaren Kategorieparametern und automatischer Vorbelegung aus Schema.org/JSON-LD und OpenGraph
+- Artikelimport aus Produktlinks mit prüfbarer Vorschau, direkt editierbaren Kategorieparametern und automatischer Vorbelegung aus Schema.org/JSON-LD, OpenGraph sowie Adam-Hall-Shop-Produktdetails
 - Lieferantenstamm mit Preferred-Status, Konditionen, Lieferzeit, Bewertung und Risiko
 - Mehrere Angebote pro Artikel mit Einkaufslink, Mindestmenge, Packgröße und Preisverlauf
 - Tiefpreis-Alarme, die bei neuen oder geänderten Angeboten automatisch auslösen
@@ -29,7 +29,7 @@ go run ./cmd/server
 
 Der Service läuft standardmäßig auf Port `8084`. `CORES_JWT_SECRET` und die PostgreSQL-Zugangsdaten müssen denen des Cores-Stacks entsprechen.
 
-Der Linkimport ruft ausschließlich öffentliche HTTP(S)-Ziele auf Standardports ab, begrenzt Laufzeit und Weiterleitungen und blockiert interne, lokale sowie Link-Local-Netze. Von sehr großen Shopseiten werden höchstens die ersten 16 MB verarbeitet; liegen die Produktdaten wie üblich früh im Dokument, funktioniert der Import auch bei insgesamt größeren Seiten. JavaScript-only-Shops oder Seiten mit Bot-Schutz können unvollständige Daten liefern; alle erkannten Werte bleiben deshalb vor dem Import editierbar.
+Der Linkimport ruft ausschließlich öffentliche HTTP(S)-Ziele auf Standardports ab, begrenzt Laufzeit und Weiterleitungen und blockiert interne, lokale sowie Link-Local-Netze. Von sehr großen Shopseiten werden höchstens die ersten 16 MB verarbeitet; liegen die Produktdaten wie üblich früh im Dokument, funktioniert der Import auch bei insgesamt größeren Seiten. Adam-Hall-Shopseiten werden zusätzlich anhand ihrer serverseitig gerenderten Artikeldaten erkannt, sodass Artikelnummer, Marke und technische Spezifikationen übernommen werden. JavaScript-only-Shops oder Seiten mit Bot-Schutz können unvollständige Daten liefern; alle erkannten Werte bleiben deshalb vor dem Import editierbar.
 
 ## Container
 
