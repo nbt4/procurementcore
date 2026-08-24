@@ -60,6 +60,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 }
 
 .brand img { max-width: 178px; max-height: 45px; object-fit: contain; }
+.mobile-brand { width: 32px; height: 32px; object-fit: contain; }
 .brand-mark {
   display: grid;
   width: 36px;

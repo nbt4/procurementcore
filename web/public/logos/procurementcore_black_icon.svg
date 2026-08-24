@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-label="ProcurementCore Bildmarke">
+  <rect x="3" y="3" width="90" height="90" rx="12" fill="none" stroke="#D0021B" stroke-width="5"/>
+  <path d="M24 34h48l-6 38H30z" fill="none" stroke="#101719" stroke-width="6" stroke-linejoin="round"/>
+  <path d="M35 34c0-10 5-16 13-16s13 6 13 16" fill="none" stroke="#101719" stroke-width="6" stroke-linecap="round"/>
+</svg>

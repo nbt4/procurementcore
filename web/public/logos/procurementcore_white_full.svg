@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 300" role="img" aria-label="ProcurementCore">
+  <g transform="translate(132 24)"><rect x="3" y="3" width="90" height="90" rx="12" fill="none" stroke="#D0021B" stroke-width="5"/><path d="M24 34h48l-6 38H30z" fill="none" stroke="#EDF0ED" stroke-width="6" stroke-linejoin="round"/><path d="M35 34c0-10 5-16 13-16s13 6 13 16" fill="none" stroke="#EDF0ED" stroke-width="6" stroke-linecap="round"/></g>
+  <text x="180" y="174" text-anchor="middle" fill="#EDF0ED" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="40" font-weight="650">Procurement</text>
+  <text x="180" y="226" text-anchor="middle" fill="#F87171" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="38" font-weight="700" letter-spacing="5">CORE</text>
+</svg>

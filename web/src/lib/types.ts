@@ -1,5 +1,6 @@
 export type User = { userId: number; username: string; isAdmin: boolean }
-export type Branding = { companyName: string; brandName: string; sidebarLogo: string; loginLogo: string; faviconPath: string; logoSizeSidebar: number; logoSizeLogin: number }
+export type BrandingAssets = { markOnDark?: string; markOnLight?: string; horizontalOnDark?: string; horizontalOnLight?: string; stackedOnDark?: string; stackedOnLight?: string; favicon?: string; appIcon?: string; maskableIcon?: string; print?: string }
+export type Branding = { productName: string; companyName: string; brandName: string; assets: BrandingAssets; companyAssets: BrandingAssets; sidebarLogo: string; loginLogo: string; faviconPath: string }
 export type ParameterDefinition = { key: string; label: string; type: 'text'|'number'|'select'|'boolean'; unit?: string; options?: string[] }
 export type Category = { id: number; name: string; description: string; parameterSchema: ParameterDefinition[] }
 export type Supplier = { id: number; name: string; code: string; website: string; contactName: string; email: string; phone: string; paymentTerms: string; defaultLeadDays: number; rating: number; preferred: boolean; active: boolean; riskLevel: 'low'|'medium'|'high'; notes: string }

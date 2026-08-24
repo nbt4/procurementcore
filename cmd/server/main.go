@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"mime"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -23,7 +25,7 @@ import (
 	"github.com/rs/zerolog"
 )
 
-const version = "1.0.15"
+const version = "1.0.16"
 
 //go:embed all:dist
 var frontend embed.FS
@@ -44,6 +46,11 @@ func main() {
 	}
 
 	branding := commonbranding.NewService(db, "procurement")
+	dist, err := fs.Sub(frontend, "dist")
+	if err != nil {
+		log.Fatal().Err(err).Msg("frontend unavailable")
+	}
+	assets := http.FileServer(http.FS(dist))
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
@@ -57,18 +64,40 @@ func main() {
 	})
 	mux.HandleFunc("GET /api/v1/branding", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, http.StatusOK, branding.GetConfig()) })
 	mux.HandleFunc("POST /api/v1/auth/logout", logoutHandler(cfg.CookieDomain))
-	mux.Handle("/logos/", http.StripPrefix("/logos/", http.FileServer(http.Dir("/var/lib/branding/logos"))))
+	mux.HandleFunc("GET /logos/{filename}", func(w http.ResponseWriter, r *http.Request) {
+		filename := filepath.Base(r.PathValue("filename"))
+		if filename == "." || filename == "" || filename != r.PathValue("filename") {
+			http.NotFound(w, r)
+			return
+		}
+		volumePath := filepath.Join("/var/lib/branding/logos", filename)
+		if info, statErr := os.Stat(volumePath); statErr == nil && !info.IsDir() {
+			http.ServeFile(w, r, volumePath)
+			return
+		}
+		data, readErr := fs.ReadFile(dist, "logos/"+filename)
+		if readErr != nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", mime.TypeByExtension(filepath.Ext(filename)))
+		_, _ = w.Write(data)
+	})
+	mux.HandleFunc("GET /manifest.webmanifest", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/manifest+json")
+		w.Header().Set("Cache-Control", "no-cache")
+		_ = json.NewEncoder(w).Encode(commonbranding.Manifest(branding.GetConfig(), commonbranding.ManifestOptions{
+			Name: "ProcurementCore", StartURL: "/", Scope: "/", ThemeColor: "#101719", BackgroundColor: "#101719",
+			FallbackIcon192: "/app-icons/icon-192.png", FallbackIcon512: "/app-icons/icon-512.png",
+			FallbackMaskable: "/app-icons/icon-maskable-512.png",
+		}))
+	})
 	productScraper := scraper.New(scraper.Options{
 		AdamHallUsername: cfg.AdamHallUsername,
 		AdamHallPassword: cfg.AdamHallPassword,
 	})
 	mux.Handle("/api/v1/", http.StripPrefix("/api/v1", auth.Middleware(api.NewHandler(db, productScraper).Routes())))
 
-	dist, err := fs.Sub(frontend, "dist")
-	if err != nil {
-		log.Fatal().Err(err).Msg("frontend unavailable")
-	}
-	assets := http.FileServer(http.FS(dist))
 	mux.Handle("GET /assets/", assets)
 	index, err := fs.ReadFile(dist, "index.html")
 	if err != nil {

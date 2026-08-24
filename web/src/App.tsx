@@ -27,6 +27,8 @@ function Shell({ user, branding, children }:{ user:User; branding:Branding|null;
   const location = useLocation()
   const [loggingOut,setLoggingOut] = useState(false)
   const active = navigation.find(item => item.to === '/' ? location.pathname === '/' : location.pathname.startsWith(item.to))
+  const horizontalLogo = branding?.assets?.horizontalOnDark || branding?.sidebarLogo || '/logos/procurementcore_white_side.svg'
+  const markLogo = branding?.assets?.markOnDark || '/logos/procurementcore_white_icon.svg'
   const logout = async () => {
     setLoggingOut(true)
     try {
@@ -38,7 +40,7 @@ function Shell({ user, branding, children }:{ user:User; branding:Branding|null;
   return <div className="shell">
     <aside className="sidebar">
       <a className="brand" href={window.__DASHBOARD_URL__ || '/'}>
-        {branding?.sidebarLogo ? <img src={branding.sidebarLogo} alt="ProcurementCore"/> : <><span className="brand-mark" aria-hidden="true">P</span><span className="brand-lockup"><strong>Procurement</strong><small>Core</small></span></>}
+        <img src={horizontalLogo} alt={branding?.productName || 'ProcurementCore'}/>
       </a>
       <nav className="nav">{navigation.map(({to,label,icon:Icon})=><NavLink key={to} to={to} end={to==='/' }><Icon size={18}/><span>{label}</span></NavLink>)}</nav>
       <div className="sidebar-footer">
@@ -48,7 +50,7 @@ function Shell({ user, branding, children }:{ user:User; branding:Branding|null;
         <button className="btn ghost logout-button" disabled={loggingOut} onClick={logout}><LogOut size={16}/>{loggingOut?'Wird abgemeldet …':'Abmelden'}</button>
       </div>
     </aside>
-    <header className="mobile-header"><strong>ProcurementCore</strong><span className="mobile-actions"><span className="badge accent"><Menu size={13}/>{active?.label}</span><button className="mobile-logout" disabled={loggingOut} onClick={logout} aria-label="Abmelden" title="Abmelden"><LogOut size={17}/></button></span></header>
+    <header className="mobile-header"><img className="mobile-brand" src={markLogo} alt={branding?.productName || 'ProcurementCore'}/><span className="mobile-actions"><span className="badge accent"><Menu size={13}/>{active?.label}</span><button className="mobile-logout" disabled={loggingOut} onClick={logout} aria-label="Abmelden" title="Abmelden"><LogOut size={17}/></button></span></header>
     <main className="main"><header className="topbar"><div className="topbar-context"><span>Procurement</span><i>/</i><strong>{active?.label || 'Übersicht'}</strong></div><div className="top-actions"><span className="user-chip"><Users size={14}/>{user.username}</span></div></header>{children}</main>
     <nav className="mobile-tabs">{navigation.filter(n=>n.mobile).map(({to,label,icon:Icon})=><NavLink key={to} to={to} end={to==='/' }><Icon size={19}/><span>{label}</span></NavLink>)}</nav>
   </div>
@@ -56,7 +58,12 @@ function Shell({ user, branding, children }:{ user:User; branding:Branding|null;
 
 export default function App() {
   const [user,setUser]=useState<User|null>(null), [branding,setBranding]=useState<Branding|null>(null), [loading,setLoading]=useState(true), [refreshKey,setRefreshKey]=useState(0), [toast,setToast]=useState('')
-  useEffect(()=>{ Promise.all([api<User>('/me'),api<Branding>('/branding').catch(()=>null)]).then(([u,b])=>{setUser(u);setBranding(b); if(b?.faviconPath){let link=document.querySelector<HTMLLinkElement>("link[rel~='icon']");if(!link){link=document.createElement('link');link.rel='icon';document.head.appendChild(link)}link.href=b.faviconPath}}).finally(()=>setLoading(false)) },[])
+  useEffect(()=>{
+    const applyBranding=(b:Branding|null)=>{ if(!b)return; setBranding(b); const links:[string,string,string|undefined][]=[["link[rel~='icon']",'icon',b.assets?.favicon||b.faviconPath],["link[rel='apple-touch-icon']",'apple-touch-icon',b.assets?.appIcon]]; links.forEach(([selector,rel,href])=>{if(!href)return;let link=document.querySelector<HTMLLinkElement>(selector);if(!link){link=document.createElement('link');link.rel=rel;document.head.appendChild(link)}link.href=href}) }
+    Promise.all([api<User>('/me'),api<Branding>('/branding').catch(()=>null)]).then(([u,b])=>{setUser(u);applyBranding(b)}).finally(()=>setLoading(false))
+    const interval=window.setInterval(()=>{api<Branding>('/branding').then(applyBranding).catch(()=>undefined)},60_000)
+    return()=>window.clearInterval(interval)
+  },[])
   useEffect(()=>{ if(!toast)return; const id=setTimeout(()=>setToast(''),3200); return()=>clearTimeout(id) },[toast])
   if(loading) return <div className="empty app-loading">ProcurementCore wird geladen …</div>
   if(!user) return <Navigate to="/"/>
