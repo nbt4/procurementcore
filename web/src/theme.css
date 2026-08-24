@@ -12,9 +12,10 @@
   --border-subtle: #20292b;
   --border-color: #2a3537;
   --border-default: 1px solid var(--border-color);
-  --accent: #c4475b;
-  --accent-strong: #e06879;
-  --accent-soft: rgba(196, 71, 91, .14);
+  --accent: #d0021b;
+  --accent-hover: #a00115;
+  --accent-strong: #f87171;
+  --accent-soft: rgba(208, 2, 27, .14);
   --success: #4f9a76;
   --success-soft: rgba(79, 154, 118, .13);
   --warning: #c6944f;

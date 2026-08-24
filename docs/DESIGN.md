@@ -7,7 +7,7 @@ ProcurementCore ist ein Arbeitsinstrument für Einkauf und Freigaben, kein Marke
 ## Visuelle Regeln
 
 - Graphit und tiefes Petrolschwarz bilden Navigation, Arbeitsfläche und Panels.
-- Gedecktes Karminrot ist der einzige Markenakzent. Es kennzeichnet aktive Navigation, Primäraktionen und wenige Orientierungspunkte.
+- Das gemeinsame RentalCore-Rot ist der einzige Markenakzent. Es kennzeichnet aktive Navigation, Primäraktionen und wenige Orientierungspunkte.
 - Erfolgs-, Warn-, Fehler- und Informationsfarben bleiben semantisch und werden nicht dekorativ verwendet.
 - Radien bleiben zwischen 2 und 9 Pixeln. Statusmarker sind keine Pills.
 - Panels verwenden Haarlinien statt Leuchteffekten oder großen Schatten. Schatten sind Dialogen und Toasts vorbehalten.
@@ -34,8 +34,9 @@ ProcurementCore ist ein Arbeitsinstrument für Einkauf und Freigaben, kein Marke
 | Eingabefläche | `#182123` |
 | Primärtext | `#edf0ed` |
 | Sekundärtext | `#b7bfbc` |
-| Akzent | `#c4475b` |
-| Akzent hell | `#e06879` |
+| Akzent | `#d0021b` |
+| Akzent Hover | `#a00115` |
+| Akzent hell | `#f87171` |
 | Rahmen | `#2a3537` |
 
 Die implementierten Tokens liegen in `web/src/theme.css`; Komponenten- und Responsive-Regeln liegen in `web/src/index.css`.
