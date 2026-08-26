@@ -16,6 +16,7 @@ Die erste Version übernimmt die wiederkehrenden Kernmuster etablierter Procurem
 8. Empfangen: Teil- und Komplettwareneingänge mit Mengenprüfung.
 9. Steuern: Spend, Einsparungen, offene Freigaben, Preisalarme, Aktivitätslog und CSV-Export.
 10. Plattform: Cores-SSO, Adminrechte, Branding, Dashboard, Healthcheck, Docker und PostgreSQL.
+11. Shop-Import: JSON-LD, schema.org-Microdata, OpenGraph und kontrollierte Adapter für Veranstaltungstechnik, Kabel, Stecker, Infrastruktur, Euroboxen und Casebau.
 
 ## Sinnvolle nächste Integrationen
 
@@ -23,4 +24,4 @@ Die erste Version übernimmt die wiederkehrenden Kernmuster etablierter Procurem
 - RFQ-Versand per E-Mail und Lieferantenantworten als Dokumente
 - Rechnungsprüfung (2-/3-Wege-Abgleich) mit RentalCore/Finanzexport
 - CSV/XLSX-Import für große Lieferantenpreislisten
-- Kontrollierte Shop-Connectoren oder PunchOut statt generischem Web-Scraping
+- Zeitgesteuerte Preisaktualisierungen und Shop-Jobs auf Basis der kontrollierten Adapter; für vertraglich angebundene Lieferanten PunchOut oder offizielle APIs

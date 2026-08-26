@@ -59,6 +59,141 @@ func TestParseHTMLFallsBackToOpenGraph(t *testing.T) {
 	}
 }
 
+func TestParseHTMLUsesSchemaMicrodata(t *testing.T) {
+	source, _ := url.Parse("https://shop.example/product")
+	page := `<div itemscope itemtype="https://schema.org/Product">
+      <nav itemscope itemtype="https://schema.org/BreadcrumbList"><meta itemprop="name" content="Home"></nav>
+      <h1 itemprop="name">Touring Cable</h1>
+      <meta itemprop="image" content="/cable.jpg">
+      <span itemprop="sku">TC-10</span>
+      <div itemprop="brand" itemscope itemtype="https://schema.org/Brand"><meta itemprop="name" content="Roadline"></div>
+      <div itemprop="offers" itemscope itemtype="https://schema.org/Offer">
+        <meta itemprop="price" content="19.90"><span itemprop="priceCurrency">€</span>
+      </div>
+    </div>`
+	preview, err := ParseHTML(strings.NewReader(page), source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.Name != "Touring Cable" || preview.SKU != "TC-10" || preview.Manufacturer != "Roadline" {
+		t.Fatalf("unexpected identity: %+v", preview)
+	}
+	if preview.PriceCents != 1990 || preview.Currency != "EUR" || preview.ImageURL != "https://shop.example/cable.jpg" {
+		t.Fatalf("unexpected offer: %+v", preview)
+	}
+	if preview.Source != "schema.org Microdata" {
+		t.Fatalf("unexpected source: %q", preview.Source)
+	}
+}
+
+func TestDecodeHTMLConvertsLegacyShopCharset(t *testing.T) {
+	decoded, err := decodeHTML([]byte{'G', 'r', 0xfc, 0xdf, 'e'}, "text/html; charset=ISO-8859-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(decoded) != "Grüße" {
+		t.Fatalf("unexpected decoded text: %q", decoded)
+	}
+}
+
+func TestParseHTMLRecognizesLTTProduct(t *testing.T) {
+	source, _ := url.Parse("https://www.ltt-versand.de/technik/kabel/29358/product")
+	page := `<div class="product--details" itemscope itemtype="https://schema.org/Product">
+      <h1 itemprop="name">Adam Hall Cables K4 IPP 0090</h1><meta itemprop="image" content="/cable.jpg">
+      <div itemprop="brand" itemscope><meta itemprop="name" content="Adam Hall Cables"></div>
+      <div itemprop="offers" itemscope><meta itemprop="price" content="7.56"><meta itemprop="priceCurrency" content="EUR"></div>
+      <div class="product--base-info"><div class="ordernumber"><span itemprop="sku">500103380</span></div><div class="ean"><strong>EAN:</strong> 4049521119262</div><div class="suppliernumber"><strong>MPN:</strong> K4IPP0090</div></div>
+      <div class="product--description ltt--text"><p>Robustes Kabel</p><table><tr><td>Kabellänge:</td><td>0,9 m</td></tr><tr><td>Anschluss 1:</td><td>6,3 mm Klinke</td></tr></table></div>
+    </div>`
+	preview, err := ParseHTML(strings.NewReader(page), source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.Source != "LTT/HTML" || preview.SKU != "500103380" || preview.Model != "K4IPP0090" || preview.PriceCents != 756 {
+		t.Fatalf("unexpected preview: %+v", preview)
+	}
+	if preview.Attributes["EAN"] != "4049521119262" || preview.Attributes["Kabellänge"] != "0,9 m" {
+		t.Fatalf("unexpected attributes: %+v", preview.Attributes)
+	}
+}
+
+func TestParseHTMLRecognizesHussProduct(t *testing.T) {
+	source, _ := url.Parse("https://www.huss-licht-ton.de/product_info.php/info/57377.html")
+	page := `<div class="product-wrapper" itemscope itemtype="http://schema.org/Product">
+      <h1 itemprop="name">Adam Hall Adapterkabel - K4TPP0300</h1><meta itemprop="image" content="/57377.jpg">
+      <span itemprop="description"><ul><li>Kabellänge: 3 m</li><li>Gewicht: 0.256 kg</li></ul></span>
+      <div class="ad_merkmale_content_element_wrapper"><div class="ad_merkmale_content_element_left">Von Stecker A</div><div class="ad_merkmale_content_element_right">2x Klinke 6.3mm Mono</div></div>
+      <div itemprop="offers" itemscope><span itemprop="price">17.6</span><span itemprop="priceCurrency">€</span></div>
+      <div itemprop="sku">AHAK4TPP0300</div><div itemprop="brand">Adam Hall</div><span itemprop="gtin13">4049521119859</span>
+    </div>`
+	preview, err := ParseHTML(strings.NewReader(page), source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.Source != "Huss Licht & Ton/HTML" || preview.SKU != "AHAK4TPP0300" || preview.Model != "K4TPP0300" || preview.PriceCents != 1760 {
+		t.Fatalf("unexpected preview: %+v", preview)
+	}
+	if preview.Attributes["Kabellänge"] != "3 m" || preview.Attributes["Von Stecker A"] != "2x Klinke 6.3mm Mono" || preview.Attributes["EAN"] != "4049521119859" {
+		t.Fatalf("unexpected attributes: %+v", preview.Attributes)
+	}
+}
+
+func TestParseHTMLRecognizesThomannProduct(t *testing.T) {
+	source, _ := url.Parse("https://www.thomann.de/de/pro_snake_cable.htm")
+	page := `<div itemscope itemtype="https://schema.org/Product">
+      <h1 itemprop="name">pro snake Speaker Cable Jack 10</h1><img itemprop="image" src="/137281.jpg">
+      <div class="product-text" itemprop="description"><ul><li class="list-item__text">Farbe: Schwarz</li></ul>
+        <ul><li class="keyfeature"><div><span class="keyfeature__label">Artikelnummer</span><span>137281</span></div></li><li class="keyfeature"><div><span class="keyfeature__label">Länge</span><span>10,00 m</span></div></li></ul>
+      </div>
+      <div itemprop="brand" itemscope><meta itemprop="name" content="pro snake"></div>
+      <div itemprop="offers" itemscope><meta itemprop="price" content="40"><meta itemprop="priceCurrency" content="EUR"></div>
+    </div>`
+	preview, err := ParseHTML(strings.NewReader(page), source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.Source != "Thomann/HTML" || preview.SKU != "137281" || preview.Manufacturer != "pro snake" || preview.PriceCents != 4000 {
+		t.Fatalf("unexpected preview: %+v", preview)
+	}
+	if preview.Attributes["Länge"] != "10,00 m" || preview.Attributes["Farbe"] != "Schwarz" {
+		t.Fatalf("unexpected attributes: %+v", preview.Attributes)
+	}
+}
+
+func TestParseHTMLRecognizesInfrastructureShops(t *testing.T) {
+	tests := []struct {
+		name       string
+		url        string
+		html       string
+		wantSource string
+		wantSKU    string
+		wantPrice  int64
+		attribute  string
+		value      string
+	}{
+		{
+			name: "Steinigke", url: "https://www.steinigke.de/mpn30245695-product.html", wantSource: "Steinigke/JSON-LD+HTML", wantSKU: "30245695", wantPrice: 1450, attribute: "Schutzart", value: "IP44",
+			html: `<script type="application/ld+json">{"@type":"Product","name":"EUROLITE Verlängerung","sku":"30245695","brand":{"name":"EUROLITE"},"offers":{"price":"14.50","priceCurrency":"EUR"}}</script><table class="technicalData"><tr><td>Schutzart:</td><td>IP44</td></tr></table>`,
+		},
+		{
+			name: "Eurobox", url: "https://www.ab-in-die-box.de/b2bde/eurobox.html", wantSource: "ab-in-die-BOX/HTML", wantSKU: "IN64-32F-XX", wantPrice: 1840, attribute: "Material", value: "PP",
+			html: `<script type="application/ld+json">{"@type":"Product","name":"falsches Zubehör","offers":{"price":"1.60","priceCurrency":"EUR"}}</script><span data-ui-id="page-title-wrapper">Eurobox 600x400x320mm</span><div class="product-description">Front offen</div><span class="product-detail-value-sku">IN64-32F-XX</span><div class="price-final_price"><span data-price-amount="18.404"></span></div><div class="aidb-product-attributes"><ul><li title="Material: PP"><div></div></li></ul></div>`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			source, _ := url.Parse(test.url)
+			preview, err := ParseHTML(strings.NewReader(test.html), source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if preview.Source != test.wantSource || preview.SKU != test.wantSKU || preview.PriceCents != test.wantPrice || preview.Attributes[test.attribute] != test.value {
+				t.Fatalf("unexpected preview: %+v", preview)
+			}
+		})
+	}
+}
+
 func TestParseDownloadedPageAcceptsLargePagesWithEarlyMetadata(t *testing.T) {
 	source, _ := url.Parse("https://shop.example/item")
 	page := []byte(`<html><head><meta property="og:title" content="Großer Artikel"></head><body>` + strings.Repeat("x", 300))
@@ -310,6 +445,41 @@ func TestSTEX24LiveSitemapFallback(t *testing.T) {
 	}
 	if preview.SKU != "136382" || preview.Attributes["Baugröße"] != "16,0/8,0 mm" || preview.Source != "STEX24 Sitemap (eingeschränkte Vorschau)" {
 		t.Fatalf("unexpected live STEX24 preview: %+v", preview)
+	}
+}
+
+func TestEventTechnologyShopsLive(t *testing.T) {
+	if os.Getenv("SHOP_SCRAPER_LIVE_TEST") != "1" {
+		t.Skip("set SHOP_SCRAPER_LIVE_TEST=1 to test supported shops")
+	}
+	tests := []struct {
+		name      string
+		url       string
+		wantName  string
+		wantSKU   string
+		wantPrice bool
+	}{
+		{"LTT", "https://www.ltt-versand.de/technik/kabel/instrumentenkabel/pedalboard-patchkabel/29358/adam-hall-cables-k4-ipp-0090-instrumentenkabel-rean-6-3-mm-klinke-mono-auf", "K4 IPP 0090", "500103380", true},
+		{"Huss", "https://www.huss-licht-ton.de/product_info.php/Adam-Hall-4-Star-Adapterkabel-30m-Klinke-Mono/info/57377.html", "Adapterkabel", "AHAK4TPP0300", true},
+		{"Huss connector", "https://www.huss-licht-ton.de/product_info.php/XLR-Stecker-Eco-Version-5-pol-Kabel-maennlich/info/664.html", "XLR Stecker", "XMK105NB", true},
+		{"Thomann", "https://www.thomann.de/de/pro_snake_gitarrenlautsprecherkabel_10.htm", "Gitarren-Lautsprecherkabel", "137281", true},
+		{"Thomann flightcase", "https://www.thomann.de/de/thon_turntable_flightcase.htm", "Flightcase", "363507", true},
+		{"Steinigke", "https://www.steinigke.de/mpn30245695-eurolite-verlaengerung-3x15-3m.html", "EUROLITE", "30245695", true},
+		{"Eurobox", "https://www.ab-in-die-box.de/b2bde/catalog/product/view/_ignore_category/1/id/2001/s/euroboxen-eurokisten-eurokaesten-nextgen-insight-front-offen-600x400x320", "Eurobox", "IN64-32F-XX", true},
+		{"Caseman", "https://www.caseman-berlin.de/de/aluminium-profile/deckelrahmen/rahmenprofil-4mm-37x20x2-5-passend-zu-0315-1.html", "Rahmenprofil", "EG-0400-2M", true},
+	}
+	fetcher := New(Options{})
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			preview, err := fetcher.Scrape(t.Context(), test.url)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(preview.Name, test.wantName) || preview.SKU != test.wantSKU || (test.wantPrice && preview.PriceCents <= 0) {
+				t.Fatalf("unexpected live preview: %+v", preview)
+			}
+			t.Logf("%s: %s, %s, %.2f %s, %d attributes", preview.Source, preview.Name, preview.SKU, float64(preview.PriceCents)/100, preview.Currency, len(preview.Attributes))
+		})
 	}
 }
 

@@ -25,6 +25,7 @@ import (
 	"time"
 
 	xhtml "golang.org/x/net/html"
+	xcharset "golang.org/x/net/html/charset"
 )
 
 const (
@@ -154,6 +155,10 @@ func (f *Fetcher) Scrape(ctx context.Context, rawURL string) (ProductPreview, er
 	if err != nil {
 		return ProductPreview{}, errors.New("Produktseite konnte nicht gelesen werden")
 	}
+	body, err = decodeHTML(body, response.Header.Get("Content-Type"))
+	if err != nil {
+		return ProductPreview{}, errors.New("Zeichensatz der Produktseite konnte nicht gelesen werden")
+	}
 	preview, err := parseDownloadedPage(body, response.Request.URL, maxPageBytes)
 	if err != nil {
 		return ProductPreview{}, err
@@ -170,6 +175,14 @@ func (f *Fetcher) Scrape(ctx context.Context, rawURL string) (ProductPreview, er
 		}
 	}
 	return preview, nil
+}
+
+func decodeHTML(body []byte, contentType string) ([]byte, error) {
+	reader, err := xcharset.NewReader(strings.NewReader(string(body)), contentType)
+	if err != nil {
+		return nil, err
+	}
+	return io.ReadAll(io.LimitReader(reader, maxPageBytes+1))
 }
 
 func (f *Fetcher) adamHallPrice(ctx context.Context, sku string) (adamHallPrice, error) {
@@ -630,6 +643,9 @@ func ParseHTML(reader io.Reader, sourceURL *url.URL) (ProductPreview, error) {
 			break
 		}
 	}
+	if applyMicrodata(&preview, document) && preview.Source == "" {
+		preview.Source = "schema.org Microdata"
+	}
 	if preview.Name == "" {
 		preview.Name = first(meta["og:title"], meta["twitter:title"], title)
 	}
@@ -648,6 +664,7 @@ func ParseHTML(reader io.Reader, sourceURL *url.URL) (ProductPreview, error) {
 	if isAdamHallHost(sourceURL.Hostname()) {
 		applyAdamHallPage(&preview, document)
 	}
+	applyShopPage(&preview, document, sourceURL)
 	if preview.Source == "" && preview.Name != "" {
 		preview.Source = "OpenGraph/HTML"
 	}
