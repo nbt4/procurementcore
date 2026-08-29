@@ -1,4 +1,6 @@
-export const apiBase = '/api/v1'
+import { appPath, dashboardURL } from './app-paths'
+
+export const apiBase = appPath('/api/v1')
 
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(`${apiBase}${path}`, {
@@ -8,7 +10,7 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   })
   if (response.status === 401) {
     const redirect = encodeURIComponent(window.location.pathname + window.location.search)
-    window.location.href = `${window.__DASHBOARD_URL__ || ''}/login?redirect=${redirect}`
+    window.location.href = new URL(`/login?redirect=${redirect}`, dashboardURL === '/' ? window.location.origin : dashboardURL).toString()
     throw new Error('Nicht angemeldet')
   }
   if (!response.ok) {

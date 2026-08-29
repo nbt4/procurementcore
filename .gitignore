@@ -4,6 +4,7 @@ web/node_modules/
 web/dist/
 cmd/server/dist/assets/
 cmd/server/dist/logos/
+cmd/server/dist/app-icons/
 *.log
 *.tsbuildinfo
 .DS_Store

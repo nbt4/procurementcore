@@ -25,7 +25,16 @@ import (
 	"github.com/rs/zerolog"
 )
 
-const version = "1.0.21"
+const version = "1.0.22"
+
+const procurementMountPath = "/procurementcore"
+
+func requestMountPath(r *http.Request) string {
+	if strings.TrimSuffix(r.Header.Get("X-Forwarded-Prefix"), "/") == procurementMountPath {
+		return procurementMountPath
+	}
+	return ""
+}
 
 //go:embed all:dist
 var frontend embed.FS
@@ -64,7 +73,7 @@ func main() {
 	})
 	mux.HandleFunc("GET /api/v1/branding", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, http.StatusOK, branding.GetConfig()) })
 	mux.HandleFunc("POST /api/v1/auth/logout", logoutHandler(cfg.CookieDomain))
-	mux.HandleFunc("GET /logos/{filename}", func(w http.ResponseWriter, r *http.Request) {
+	logoHandler := func(w http.ResponseWriter, r *http.Request) {
 		filename := filepath.Base(r.PathValue("filename"))
 		if filename == "." || filename == "" || filename != r.PathValue("filename") {
 			http.NotFound(w, r)
@@ -82,16 +91,22 @@ func main() {
 		}
 		w.Header().Set("Content-Type", mime.TypeByExtension(filepath.Ext(filename)))
 		_, _ = w.Write(data)
-	})
-	mux.HandleFunc("GET /manifest.webmanifest", func(w http.ResponseWriter, _ *http.Request) {
+	}
+	mux.HandleFunc("GET /logos/{filename}", logoHandler)
+	mux.HandleFunc("GET /procurementcore/logos/{filename}", logoHandler)
+	manifestHandler := func(w http.ResponseWriter, r *http.Request) {
+		mountPath := requestMountPath(r)
+		prefix := mountPath + "/"
 		w.Header().Set("Content-Type", "application/manifest+json")
 		w.Header().Set("Cache-Control", "no-cache")
 		_ = json.NewEncoder(w).Encode(commonbranding.Manifest(branding.GetConfig(), commonbranding.ManifestOptions{
-			Name: "ProcurementCore", StartURL: "/", Scope: "/", ThemeColor: "#101719", BackgroundColor: "#101719",
-			FallbackIcon192: "/app-icons/icon-192.png", FallbackIcon512: "/app-icons/icon-512.png",
-			FallbackMaskable: "/app-icons/icon-maskable-512.png",
+			Name: "ProcurementCore", StartURL: prefix, Scope: prefix, ThemeColor: "#101719", BackgroundColor: "#101719",
+			FallbackIcon192: mountPath + "/app-icons/icon-192.png", FallbackIcon512: mountPath + "/app-icons/icon-512.png",
+			FallbackMaskable: mountPath + "/app-icons/icon-maskable-512.png",
 		}))
-	})
+	}
+	mux.HandleFunc("GET /manifest.webmanifest", manifestHandler)
+	mux.HandleFunc("GET /procurementcore/manifest.webmanifest", manifestHandler)
 	productScraper := scraper.New(scraper.Options{
 		AdamHallUsername: cfg.AdamHallUsername,
 		AdamHallPassword: cfg.AdamHallPassword,
@@ -99,14 +114,23 @@ func main() {
 	mux.Handle("/api/v1/", http.StripPrefix("/api/v1", auth.Middleware(api.NewHandler(db, productScraper).Routes())))
 
 	mux.Handle("GET /assets/", assets)
+	mux.Handle("GET /procurementcore/assets/", http.StripPrefix(procurementMountPath, assets))
 	index, err := fs.ReadFile(dist, "index.html")
 	if err != nil {
 		log.Fatal().Err(err).Msg("index unavailable")
 	}
 	index = []byte(strings.Replace(string(index), "</head>", fmt.Sprintf("<script>window.__DASHBOARD_URL__=%q</script></head>", cfg.DashboardURL), 1))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if strings.Contains(r.URL.Path, ".") {
-			assets.ServeHTTP(w, r)
+		normalizedPath := r.URL.Path
+		if normalizedPath == procurementMountPath {
+			normalizedPath = "/"
+		} else if strings.HasPrefix(normalizedPath, procurementMountPath+"/") {
+			normalizedPath = strings.TrimPrefix(normalizedPath, procurementMountPath)
+		}
+		if strings.Contains(normalizedPath, ".") {
+			request := r.Clone(r.Context())
+			request.URL.Path = normalizedPath
+			assets.ServeHTTP(w, request)
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")

@@ -56,7 +56,7 @@ docker build -t nobentie/procurementcore:latest .
 docker run --rm -p 8084:8084 --env-file .env nobentie/procurementcore:latest
 ```
 
-Im Gesamt-Stack läuft ProcurementCore als eigenständiger Compose-Service auf Host-Port `8084`. Die öffentliche URL ist `https://procurement.tsunami-events.de`; das Cores-Dashboard verlinkt dorthin und stellt ausdrücklich keinen `/procurement`-Proxy bereit.
+Im Gesamt-Stack läuft ProcurementCore als eigener Compose-Service auf Host-Port `8084`. Dasselbe Image arbeitet im globalen Subdomainmodus unter seiner `PROCUREMENTCORE_PUBLIC_URL` oder im Pfadmodus hinter dem Dashboard-Gateway unter `/procurementcore/`.
 
 ## API
 
