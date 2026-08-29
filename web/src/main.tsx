@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom'
 import App from './App'
 import './theme.css'
 import './index.css'
+import './cores-theme.css'
 
 document.addEventListener('wheel', (event) => {
   const target = event.target

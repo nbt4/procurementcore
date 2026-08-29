@@ -1,4 +1,4 @@
-export type User = { userId: number; username: string; isAdmin: boolean }
+export type User = { userId: number; username: string; displayName?: string; isAdmin: boolean }
 export type BrandingAssets = { markOnDark?: string; markOnLight?: string; horizontalOnDark?: string; horizontalOnLight?: string; stackedOnDark?: string; stackedOnLight?: string; favicon?: string; appIcon?: string; maskableIcon?: string; print?: string }
 export type Branding = { productName: string; companyName: string; brandName: string; assets: BrandingAssets; companyAssets: BrandingAssets; sidebarLogo: string; loginLogo: string; faviconPath: string }
 export type ParameterDefinition = { key: string; label: string; type: 'text'|'number'|'select'|'boolean'; unit?: string; options?: string[] }

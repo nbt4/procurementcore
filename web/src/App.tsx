@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
-import { BellRing, Boxes, Building2, ChevronLeft, ChevronRight, ClipboardCheck, FileDown, Gauge, Home, LogOut, Menu, ShoppingCart, Users } from 'lucide-react'
+import { BellRing, Boxes, Building2, ChevronLeft, ChevronRight, ClipboardCheck, FileDown, Gauge, Home, LogOut, Menu, ShoppingCart } from 'lucide-react'
 import { api, apiBase } from './lib/api'
 import type { Branding, User } from './lib/types'
 import DashboardPage from './pages/DashboardPage'
@@ -49,12 +49,12 @@ function Shell({ user, branding, children }:{ user:User; branding:Branding|null;
       <div className="sidebar-footer">
         <a className="btn ghost sidebar-action" href={`${apiBase}/export/spend.csv`} title={!sidebarExpanded?'Spend exportieren':undefined}><FileDown size={16}/><span>Spend exportieren</span></a>
         <a className="btn ghost sidebar-action" href={window.__DASHBOARD_URL__ || '/'} title={!sidebarExpanded?'Cores Dashboard':undefined}><Home size={16}/><span>Cores Dashboard</span></a>
-        <div className="user"><div className="avatar">{user.username.slice(0,1).toUpperCase()}</div><div className="user-meta"><div className="user-name">{user.username}</div><div className="user-role">{user.isAdmin?'Einkaufsadministration':'Anforderer'}</div></div></div>
+        <div className="user"><div className="avatar">{(user.displayName || user.username).slice(0,1).toUpperCase()}</div><div className="user-meta"><div className="user-name">{user.displayName || user.username}</div><div className="user-role">{user.isAdmin?'Einkaufsadministration':'Anforderer'}</div></div></div>
         <button className="btn ghost logout-button" disabled={loggingOut} onClick={logout} title={!sidebarExpanded?'Abmelden':undefined}><LogOut size={16}/><span>{loggingOut?'Wird abgemeldet …':'Abmelden'}</span></button>
       </div>
     </aside>
     <header className="mobile-header"><span className="mobile-actions"><span className="badge accent"><Menu size={13}/>{active?.label}</span><button className="mobile-logout" disabled={loggingOut} onClick={logout} aria-label="Abmelden" title="Abmelden"><LogOut size={17}/></button></span></header>
-    <main className={`main ${sidebarExpanded ? '' : 'sidebar-collapsed'}`}><header className="topbar"><div className="topbar-context"><span>Procurement</span><i>/</i><strong>{active?.label || 'Übersicht'}</strong></div><div className="top-actions"><span className="user-chip"><Users size={14}/>{user.username}</span></div></header>{children}</main>
+    <main className={`main ${sidebarExpanded ? '' : 'sidebar-collapsed'}`}>{children}</main>
     <nav className="mobile-tabs">{navigation.filter(n=>n.mobile).map(({to,label,icon:Icon})=><NavLink key={to} to={to} end={to==='/' }><Icon size={19}/><span>{label}</span></NavLink>)}</nav>
   </div>
 }

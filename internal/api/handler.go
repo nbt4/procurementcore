@@ -88,7 +88,23 @@ func (h *Handler) importProductPreview(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) me(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, auth.CurrentUser(r))
+	user := auth.CurrentUser(r)
+	response := struct {
+		UserID      uint   `json:"userId"`
+		Username    string `json:"username"`
+		DisplayName string `json:"displayName"`
+		IsAdmin     bool   `json:"isAdmin"`
+	}{UserID: user.ID, Username: user.Username, DisplayName: user.Username, IsAdmin: user.IsAdmin}
+	h.db.Raw(`SELECT COALESCE(
+		NULLIF(p.display_name, ''),
+		NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), ''),
+		u.username
+	) FROM users u LEFT JOIN user_profiles p ON p.user_id = u.userid WHERE u.userid = ?`, user.ID).
+		Scan(&response.DisplayName)
+	if strings.TrimSpace(response.DisplayName) == "" {
+		response.DisplayName = user.Username
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (h *Handler) dashboard(w http.ResponseWriter, r *http.Request) {

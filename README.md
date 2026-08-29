@@ -1,5 +1,11 @@
 # ProcurementCore
 
+## Einheitliches Cores Designsystem
+
+ProcurementCore verwendet das verbindliche Designsystem aus [`nbt4/cores`](https://github.com/nbt4/cores/blob/main/docs/DESIGN_SYSTEM.md). Die ehemalige separate Einkaufsakte-Palette wurde zugunsten der gemeinsamen Inter-Typografie, Graphitflächen, roten Primärfarbe, 256/80-px-Sidebar sowie identischer Tabellen-, Formular-, Dropdown-, Scrollbar- und Dashboard-Regeln abgelöst.
+
+`web/src/cores-theme.css` und `web/src/lib/cores-design.ts` sind generierte Kopien der Umbrella-Quellen und werden nie direkt geändert. Vor einer Veröffentlichung sind `./scripts/sync-design-system.sh` und `./scripts/check-design-system.sh` im Umbrella-Repository sowie Test und Build dieses Webclients auszuführen.
+
 ProcurementCore ist der Einkaufs-Service des Cores-Ökosystems. Er verbindet Bedarfsmeldungen, Lieferanten, parametrisierbare Artikel, Bezugsquellen, Tiefpreis-Alarme, Freigaben, Bestellungen und Wareneingänge in einem durchgängigen Prozess.
 
 ## Funktionsumfang
