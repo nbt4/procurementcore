@@ -10,7 +10,7 @@ ProcurementCore ist der Einkaufs-Service des Cores-Ökosystems. Er verbindet Bed
 
 ## Funktionsumfang
 
-- Sortierbarer tabellarischer Artikelkatalog mit bearbeitbaren Kategorien, visuellem Parameter-Editor und parameterbasierter Suche ohne JSON-Eingabe
+- Sortierbarer tabellarischer Artikelkatalog mit bearbeitbaren Kategorien, visuellem Parameter-Editor und kontextueller Suche über Artikel, Marke, Modell, SKU, Lieferant, Angebote und beliebige JSON-Parameter ohne JSON-Eingabe
 - Sicheres Löschen ungenutzter Kategorien; verwendete Kategorien bleiben gegen Datenverlust geschützt
 - Artikelimport aus Produktlinks mit prüfbarer Vorschau, direkt editierbaren Kategorieparametern und automatischer Vorbelegung aus JSON-LD, schema.org-Microdata und OpenGraph; eigene Adapter für Adam Hall, LTT, Huss Licht & Ton, Thomann, Steinigke, ab-in-die-BOX, Caseman und aweo
 - Lieferantenstamm mit Preferred-Status, Konditionen, Lieferzeit, Bewertung und Risiko

@@ -340,12 +340,27 @@ func ParseProductFilter(values url.Values) ProductFilter {
 	return f
 }
 
+func productSearchTerms(value string) []string {
+	return strings.Fields(strings.ToLower(strings.TrimSpace(value)))
+}
+
 func (h *Handler) listProducts(w http.ResponseWriter, r *http.Request) {
 	f := ParseProductFilter(r.URL.Query())
 	query := h.db.Model(&models.Product{}).Preload("Category").Preload("Offers", "active = ?", true).Preload("Offers.Supplier")
-	if f.Query != "" {
-		like := "%" + f.Query + "%"
-		query = query.Where("proc_products.name ILIKE ? OR proc_products.sku ILIKE ? OR proc_products.description ILIKE ? OR proc_products.manufacturer ILIKE ? OR proc_products.model ILIKE ? OR proc_products.attributes::text ILIKE ?", like, like, like, like, like, like)
+	for _, term := range productSearchTerms(f.Query) {
+		like := "%" + term + "%"
+		query = query.Where(`(
+			CONCAT_WS(' ',proc_products.id::text,proc_products.name,proc_products.sku,
+			 proc_products.description,proc_products.manufacturer,proc_products.model,
+			 proc_products.unit,proc_products.parameters::text,proc_products.attributes::text) ILIKE ?
+			OR EXISTS (SELECT 1 FROM proc_categories search_category
+			 WHERE search_category.id=proc_products.category_id AND search_category.name ILIKE ?)
+			OR EXISTS (SELECT 1 FROM proc_offers search_offer
+			 JOIN proc_suppliers search_supplier ON search_supplier.id=search_offer.supplier_id
+			 WHERE search_offer.product_id=proc_products.id AND search_offer.active=TRUE
+			 AND CONCAT_WS(' ',search_offer.supplier_sku,search_offer.purchase_url,search_supplier.name,
+			 search_supplier.code) ILIKE ?)
+		)`, like, like, like)
 	}
 	if f.Manufacturer != "" {
 		query = query.Where("proc_products.manufacturer ILIKE ?", "%"+f.Manufacturer+"%")

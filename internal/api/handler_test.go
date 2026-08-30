@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/url"
+	"reflect"
 	"testing"
 
 	"procurementcore/internal/models"
@@ -30,6 +31,14 @@ func TestParseProductFilterIgnoresInvalidNumbers(t *testing.T) {
 	got := ParseProductFilter(url.Values{"categoryId": {"nope"}, "minPriceCents": {"x"}, "param": {" :x"}})
 	if got.CategoryID != 0 || got.MinPrice != nil || len(got.Parameters) != 0 {
 		t.Fatalf("invalid values should be ignored: %+v", got)
+	}
+}
+
+func TestProductSearchTerms(t *testing.T) {
+	got := productSearchTerms(" LD Systems  Stinger SUB 18A G3 ")
+	want := []string{"ld", "systems", "stinger", "sub", "18a", "g3"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("productSearchTerms() = %#v, want %#v", got, want)
 	}
 }
 
