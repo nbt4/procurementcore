@@ -1,8 +1,9 @@
 const PROCUREMENT_MOUNT_PATH = "/procurementcore";
+const browserWindow = typeof window === "undefined" ? undefined : window;
 
 export const appBasePath =
-  window.location.pathname === PROCUREMENT_MOUNT_PATH ||
-  window.location.pathname.startsWith(`${PROCUREMENT_MOUNT_PATH}/`)
+  browserWindow?.location.pathname === PROCUREMENT_MOUNT_PATH ||
+  browserWindow?.location.pathname.startsWith(`${PROCUREMENT_MOUNT_PATH}/`)
     ? PROCUREMENT_MOUNT_PATH
     : "";
 
@@ -22,10 +23,16 @@ export function appAssetPath(value: string): string {
   return appPath(value);
 }
 
-export const dashboardURL = appBasePath ? "/" : window.__DASHBOARD_URL__ || "/";
+export function catalogProductPath(productId: number): string {
+  return `/catalog/${productId}`;
+}
+
+export const dashboardURL = appBasePath
+  ? "/"
+  : browserWindow?.__DASHBOARD_URL__ || "/";
 
 export const warehouseCoreURL =
-  window.__WAREHOUSECORE_URL__ ||
+  browserWindow?.__WAREHOUSECORE_URL__ ||
   (appBasePath ? "/warehousecore" : "http://localhost:8082");
 
 export function warehouseProductsURL(
@@ -36,7 +43,9 @@ export function warehouseProductsURL(
     : `${warehouseCoreURL}/`;
   const url = new URL(
     "products",
-    base.startsWith("/") ? window.location.origin + base : base,
+    base.startsWith("/")
+      ? (browserWindow?.location.origin || "http://localhost") + base
+      : base,
   );
   Object.entries(params || {}).forEach(([key, value]) =>
     url.searchParams.set(key, String(value)),

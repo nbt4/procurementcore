@@ -6,7 +6,7 @@ Die erste Version übernimmt die wiederkehrenden Kernmuster etablierter Procurem
 
 ## V1 – umgesetzt
 
-1. Bedarf erfassen: Katalog- oder Freitextpositionen, Kostenstelle, Begründung und Bedarfsdatum.
+1. Bedarf erfassen: Katalog- oder Freitextpositionen, Kostenstelle, Begründung und Bedarfsdatum; gespeicherte Katalogpositionen öffnen direkt den Artikel oder die hinterlegte Produktseite.
 2. Freigeben: Entwurf, Einreichung, Admin-Freigabe/Ablehnung und dokumentierte Entscheidung.
 3. Sourcing: Lieferanten, Preferred-Status, Rating, Risiko, Konditionen und Lieferzeiten.
 4. Katalog: Kategorien mit dynamischem Parameterschema und exakten Parameterfiltern.

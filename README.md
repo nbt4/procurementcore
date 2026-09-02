@@ -16,7 +16,7 @@ ProcurementCore ist der Einkaufs-Service des Cores-Ökosystems. Er verbindet Bed
 - Lieferantenstamm mit Preferred-Status, Konditionen, Lieferzeit, Bewertung und Risiko
 - Mehrere Angebote pro Artikel mit Einkaufslink, Mindestmenge, Packgröße und Preisverlauf
 - Tiefpreis-Alarme, die bei neuen oder geänderten Angeboten automatisch auslösen
-- Bedarfsmeldungen mit Entwurf, Einreichung, Freigabe, Ablehnung und Bestellkonvertierung
+- Bedarfsmeldungen mit Entwurf, Einreichung, Freigabe, Ablehnung, Bestellkonvertierung und direkten Links von Katalogpositionen zum Artikel sowie zur hinterlegten Produktseite
 - Produktabgleich mit WarehouseCore: bestehende Artikel werden anhand EAN/GTIN, Herstellerartikelnummer, Modell, Hersteller und Name vorgeschlagen und anschließend eindeutig verknüpft
 - Direkte Übernahme eines Procurement-Artikels in den vollständigen Warehouse-Produktdialog; erkannte Stammdaten und technische Attribute sind vorausgefüllt, bleiben aber bearbeitbar
 - Direktbestellungen, Lieferstatus, Teil- und Komplettwareneingänge
