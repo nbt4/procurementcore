@@ -1,16 +1,211 @@
-export type User = { userId: number; username: string; displayName?: string; isAdmin: boolean }
-export type BrandingAssets = { markOnDark?: string; markOnLight?: string; horizontalOnDark?: string; horizontalOnLight?: string; stackedOnDark?: string; stackedOnLight?: string; favicon?: string; appIcon?: string; maskableIcon?: string; print?: string }
-export type Branding = { productName: string; companyName: string; brandName: string; assets: BrandingAssets; companyAssets: BrandingAssets; sidebarLogo: string; loginLogo: string; faviconPath: string }
-export type ParameterDefinition = { key: string; label: string; type: 'text'|'number'|'select'|'boolean'; unit?: string; options?: string[] }
-export type Category = { id: number; name: string; description: string; parameterSchema: ParameterDefinition[] }
-export type Supplier = { id: number; name: string; code: string; website: string; contactName: string; email: string; phone: string; paymentTerms: string; defaultLeadDays: number; rating: number; preferred: boolean; active: boolean; riskLevel: 'low'|'medium'|'high'; notes: string }
-export type Offer = { id: number; productId: number; supplierId: number; supplier?: Supplier; supplierSku: string; priceCents: number; currency: string; minimumQuantity: number; packSize: number; leadDays: number; purchaseUrl: string; validUntil?: string; active: boolean; lastCheckedAt: string }
-export type Product = { id: number; sku: string; name: string; description: string; categoryId?: number; category?: Category; unit: string; manufacturer: string; model: string; parameters: Record<string,string|number|boolean>; attributes: Record<string,string>; active: boolean; reorderPoint: number; targetStock: number; offers: Offer[] }
-export type ProductImportPreview = { name:string; description:string; sku:string; manufacturer:string; model:string; imageUrl:string; priceCents:number; currency:string; purchaseUrl:string; attributes:Record<string,string>; source:string }
-export type Alert = { id: number; productId: number; product?: Product; targetPriceCents: number; currency: string; active: boolean; triggered: boolean; triggeredPriceCents?: number; triggeredOfferId?: number; triggeredAt?: string; createdByName: string }
-export type RequisitionLine = { id?: number; productId?: number; product?: Product; description: string; quantity: number; unit: string; estimatedPriceCents: number; preferredSupplierId?: number; purchaseUrl: string }
-export type Requisition = { id: number; number: string; title: string; status: string; requesterName: string; costCenter: string; justification: string; neededBy?: string; estimatedTotalCents: number; approvedByName: string; decisionNote: string; createdAt: string; lines: RequisitionLine[] }
-export type OrderLine = { id?: number; productId?: number; product?: Product; description: string; quantity: number; receivedQuantity: number; unit: string; unitPriceCents: number; purchaseUrl: string }
-export type Order = { id: number; number: string; supplierId: number; supplier?: Supplier; requisitionId?: number; status: string; currency: string; totalCents: number; orderedByName: string; orderDate?: string; expectedDelivery?: string; notes: string; createdAt: string; lines: OrderLine[] }
-export type Activity = { id: number; entityType: string; entityId: number; action: string; username: string; details: string; createdAt: string }
-export type Dashboard = { pendingApprovals: number; triggeredAlerts: number; preferredSuppliers: number; activeProducts: number; spend: { cents: number }; savings: { cents: number }; recentActivity: Activity[] }
+export type User = {
+  userId: number;
+  username: string;
+  displayName?: string;
+  isAdmin: boolean;
+};
+export type BrandingAssets = {
+  markOnDark?: string;
+  markOnLight?: string;
+  horizontalOnDark?: string;
+  horizontalOnLight?: string;
+  stackedOnDark?: string;
+  stackedOnLight?: string;
+  favicon?: string;
+  appIcon?: string;
+  maskableIcon?: string;
+  print?: string;
+};
+export type Branding = {
+  productName: string;
+  companyName: string;
+  brandName: string;
+  assets: BrandingAssets;
+  companyAssets: BrandingAssets;
+  sidebarLogo: string;
+  loginLogo: string;
+  faviconPath: string;
+};
+export type ParameterDefinition = {
+  key: string;
+  label: string;
+  type: "text" | "number" | "select" | "boolean";
+  unit?: string;
+  options?: string[];
+};
+export type Category = {
+  id: number;
+  name: string;
+  description: string;
+  parameterSchema: ParameterDefinition[];
+};
+export type Supplier = {
+  id: number;
+  name: string;
+  code: string;
+  website: string;
+  contactName: string;
+  email: string;
+  phone: string;
+  paymentTerms: string;
+  defaultLeadDays: number;
+  rating: number;
+  preferred: boolean;
+  active: boolean;
+  riskLevel: "low" | "medium" | "high";
+  notes: string;
+};
+export type Offer = {
+  id: number;
+  productId: number;
+  supplierId: number;
+  supplier?: Supplier;
+  supplierSku: string;
+  priceCents: number;
+  currency: string;
+  minimumQuantity: number;
+  packSize: number;
+  leadDays: number;
+  purchaseUrl: string;
+  validUntil?: string;
+  active: boolean;
+  lastCheckedAt: string;
+};
+export type Product = {
+  id: number;
+  sku: string;
+  name: string;
+  description: string;
+  categoryId?: number;
+  category?: Category;
+  unit: string;
+  manufacturer: string;
+  model: string;
+  parameters: Record<string, string | number | boolean>;
+  attributes: Record<string, string>;
+  active: boolean;
+  reorderPoint: number;
+  targetStock: number;
+  offers: Offer[];
+  warehouseProductId?: number;
+};
+export type WarehouseProductCandidate = {
+  productId: number;
+  productCode: string;
+  name: string;
+  manufacturer: string;
+  model: string;
+  manufacturerPartNumber: string;
+  ean: string;
+  category: string;
+  procurementProductId?: number;
+  score: number;
+  reasons: string[];
+};
+export type ProductLinkOverview = {
+  procurementProductId: number;
+  sku: string;
+  name: string;
+  manufacturer: string;
+  model: string;
+  warehouseProductId?: number;
+  warehouseProduct?: WarehouseProductCandidate;
+  candidates: WarehouseProductCandidate[];
+};
+export type ProductImportPreview = {
+  name: string;
+  description: string;
+  sku: string;
+  manufacturer: string;
+  model: string;
+  imageUrl: string;
+  priceCents: number;
+  currency: string;
+  purchaseUrl: string;
+  attributes: Record<string, string>;
+  source: string;
+};
+export type Alert = {
+  id: number;
+  productId: number;
+  product?: Product;
+  targetPriceCents: number;
+  currency: string;
+  active: boolean;
+  triggered: boolean;
+  triggeredPriceCents?: number;
+  triggeredOfferId?: number;
+  triggeredAt?: string;
+  createdByName: string;
+};
+export type RequisitionLine = {
+  id?: number;
+  productId?: number;
+  product?: Product;
+  description: string;
+  quantity: number;
+  unit: string;
+  estimatedPriceCents: number;
+  preferredSupplierId?: number;
+  purchaseUrl: string;
+};
+export type Requisition = {
+  id: number;
+  number: string;
+  title: string;
+  status: string;
+  requesterName: string;
+  costCenter: string;
+  justification: string;
+  neededBy?: string;
+  estimatedTotalCents: number;
+  approvedByName: string;
+  decisionNote: string;
+  createdAt: string;
+  lines: RequisitionLine[];
+};
+export type OrderLine = {
+  id?: number;
+  productId?: number;
+  product?: Product;
+  description: string;
+  quantity: number;
+  receivedQuantity: number;
+  unit: string;
+  unitPriceCents: number;
+  purchaseUrl: string;
+};
+export type Order = {
+  id: number;
+  number: string;
+  supplierId: number;
+  supplier?: Supplier;
+  requisitionId?: number;
+  status: string;
+  currency: string;
+  totalCents: number;
+  orderedByName: string;
+  orderDate?: string;
+  expectedDelivery?: string;
+  notes: string;
+  createdAt: string;
+  lines: OrderLine[];
+};
+export type Activity = {
+  id: number;
+  entityType: string;
+  entityId: number;
+  action: string;
+  username: string;
+  details: string;
+  createdAt: string;
+};
+export type Dashboard = {
+  pendingApprovals: number;
+  triggeredAlerts: number;
+  preferredSuppliers: number;
+  activeProducts: number;
+  spend: { cents: number };
+  savings: { cents: number };
+  recentActivity: Activity[];
+};

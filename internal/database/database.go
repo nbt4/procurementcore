@@ -30,5 +30,20 @@ func Open(dsn string) (*gorm.DB, error) {
 	); err != nil {
 		return nil, fmt.Errorf("migrate procurement schema: %w", err)
 	}
+	// This suite-wide mapping table is also initialized by WarehouseCore. Keep
+	// its DDL identical and outside GORM's constraint-name reconciliation so
+	// either service can safely start first.
+	if err := db.Exec(`CREATE TABLE IF NOT EXISTS core_product_links (
+		id BIGSERIAL PRIMARY KEY,
+		procurement_product_id BIGINT NOT NULL UNIQUE,
+		warehouse_product_id BIGINT NOT NULL UNIQUE,
+		link_method VARCHAR(24) NOT NULL DEFAULT 'manual',
+		linked_by BIGINT NOT NULL DEFAULT 0,
+		linked_by_name VARCHAR(160) NOT NULL DEFAULT '',
+		created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+	)`).Error; err != nil {
+		return nil, fmt.Errorf("migrate core product links: %w", err)
+	}
 	return db, nil
 }

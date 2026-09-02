@@ -46,6 +46,10 @@ func (h *Handler) Routes() http.Handler {
 	r.With(auth.RequireAdmin).Post("/products", h.createProduct)
 	r.With(auth.RequireAdmin).Put("/products/{id}", h.updateProduct)
 	r.With(auth.RequireAdmin).Delete("/products/{id}", h.deleteProduct)
+	r.Get("/product-links", h.listProductLinks)
+	r.Get("/products/{id}/warehouse-candidates", h.warehouseCandidates)
+	r.With(auth.RequireAdmin).Post("/products/{id}/warehouse-link", h.linkWarehouseProduct)
+	r.With(auth.RequireAdmin).Delete("/products/{id}/warehouse-link", h.unlinkWarehouseProduct)
 	r.Get("/products/{id}/offers", h.listOffers)
 	r.With(auth.RequireAdmin).Post("/products/{id}/offers", h.createOffer)
 	r.With(auth.RequireAdmin).Put("/offers/{id}", h.updateOffer)
@@ -396,6 +400,7 @@ func (h *Handler) listProducts(w http.ResponseWriter, r *http.Request) {
 		serverError(w, err)
 		return
 	}
+	h.hydrateWarehouseLinks(rows)
 	writeJSON(w, http.StatusOK, rows)
 }
 
@@ -408,6 +413,10 @@ func (h *Handler) getProduct(w http.ResponseWriter, r *http.Request) {
 	if err := h.db.Preload("Category").Preload("Offers", func(tx *gorm.DB) *gorm.DB { return tx.Order("price_cents") }).Preload("Offers.Supplier").First(&row, id).Error; err != nil {
 		notFound(w)
 		return
+	}
+	var warehouseProductID int64
+	if err := h.db.Model(&models.CoreProductLink{}).Where("procurement_product_id = ?", row.ID).Pluck("warehouse_product_id", &warehouseProductID).Error; err == nil && warehouseProductID > 0 {
+		row.WarehouseProductID = &warehouseProductID
 	}
 	writeJSON(w, http.StatusOK, row)
 }

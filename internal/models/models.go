@@ -34,23 +34,37 @@ type Category struct {
 }
 
 type Product struct {
-	ID           uint            `gorm:"primaryKey" json:"id"`
-	SKU          string          `gorm:"size:80;uniqueIndex;not null" json:"sku"`
-	Name         string          `gorm:"size:240;not null;index" json:"name"`
-	Description  string          `gorm:"type:text" json:"description"`
-	CategoryID   *uint           `gorm:"index" json:"categoryId"`
-	Category     *Category       `json:"category,omitempty"`
-	Unit         string          `gorm:"size:30;default:'Stk.'" json:"unit"`
-	Manufacturer string          `gorm:"size:180;index" json:"manufacturer"`
-	Model        string          `gorm:"size:180" json:"model"`
-	Parameters   json.RawMessage `gorm:"type:jsonb;default:'{}';index:,type:gin" json:"parameters"`
-	Attributes   json.RawMessage `gorm:"type:jsonb;not null;default:'{}';index:,type:gin" json:"attributes"`
-	Active       bool            `gorm:"default:true;index" json:"active"`
-	ReorderPoint float64         `json:"reorderPoint"`
-	TargetStock  float64         `json:"targetStock"`
-	CreatedAt    time.Time       `json:"createdAt"`
-	UpdatedAt    time.Time       `json:"updatedAt"`
-	Offers       []Offer         `json:"offers,omitempty"`
+	ID                 uint            `gorm:"primaryKey" json:"id"`
+	SKU                string          `gorm:"size:80;uniqueIndex;not null" json:"sku"`
+	Name               string          `gorm:"size:240;not null;index" json:"name"`
+	Description        string          `gorm:"type:text" json:"description"`
+	CategoryID         *uint           `gorm:"index" json:"categoryId"`
+	Category           *Category       `json:"category,omitempty"`
+	Unit               string          `gorm:"size:30;default:'Stk.'" json:"unit"`
+	Manufacturer       string          `gorm:"size:180;index" json:"manufacturer"`
+	Model              string          `gorm:"size:180" json:"model"`
+	Parameters         json.RawMessage `gorm:"type:jsonb;default:'{}';index:,type:gin" json:"parameters"`
+	Attributes         json.RawMessage `gorm:"type:jsonb;not null;default:'{}';index:,type:gin" json:"attributes"`
+	Active             bool            `gorm:"default:true;index" json:"active"`
+	ReorderPoint       float64         `json:"reorderPoint"`
+	TargetStock        float64         `json:"targetStock"`
+	CreatedAt          time.Time       `json:"createdAt"`
+	UpdatedAt          time.Time       `json:"updatedAt"`
+	Offers             []Offer         `json:"offers,omitempty"`
+	WarehouseProductID *int64          `gorm:"-" json:"warehouseProductId,omitempty"`
+}
+
+// CoreProductLink is the suite-wide, one-to-one identity bridge. Product data
+// remains owned by its respective Core; only stable identities are shared.
+type CoreProductLink struct {
+	ID                   uint      `gorm:"primaryKey" json:"id"`
+	ProcurementProductID uint      `gorm:"not null;uniqueIndex" json:"procurementProductId"`
+	WarehouseProductID   int64     `gorm:"not null;uniqueIndex" json:"warehouseProductId"`
+	LinkMethod           string    `gorm:"size:24;not null;default:'manual'" json:"linkMethod"`
+	LinkedBy             uint      `json:"linkedBy"`
+	LinkedByName         string    `gorm:"size:160" json:"linkedByName"`
+	CreatedAt            time.Time `json:"createdAt"`
+	UpdatedAt            time.Time `json:"updatedAt"`
 }
 
 type Offer struct {
@@ -188,6 +202,7 @@ type Activity struct {
 func (Supplier) TableName() string          { return "proc_suppliers" }
 func (Category) TableName() string          { return "proc_categories" }
 func (Product) TableName() string           { return "proc_products" }
+func (CoreProductLink) TableName() string   { return "core_product_links" }
 func (Offer) TableName() string             { return "proc_offers" }
 func (PriceHistory) TableName() string      { return "proc_price_histories" }
 func (PriceAlert) TableName() string        { return "proc_price_alerts" }

@@ -9,6 +9,7 @@ type Config struct {
 	Port             string
 	DatabaseDSN      string
 	DashboardURL     string
+	WarehouseURL     string
 	CookieDomain     string
 	AdamHallUsername string
 	AdamHallPassword string
@@ -35,6 +36,7 @@ func Load() (Config, error) {
 		Port:             port,
 		DatabaseDSN:      dsn,
 		DashboardURL:     env("DASHBOARD_URL", "http://localhost:8080"),
+		WarehouseURL:     env("WAREHOUSECORE_PUBLIC_URL", "http://localhost:8082"),
 		CookieDomain:     os.Getenv("COOKIE_DOMAIN"),
 		AdamHallUsername: adamHallUsername,
 		AdamHallPassword: adamHallPassword,

@@ -25,7 +25,7 @@ import (
 	"github.com/rs/zerolog"
 )
 
-const version = "1.0.24"
+const version = "1.0.25"
 
 const procurementMountPath = "/procurementcore"
 
@@ -119,7 +119,7 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("index unavailable")
 	}
-	index = []byte(strings.Replace(string(index), "</head>", fmt.Sprintf("<script>window.__DASHBOARD_URL__=%q</script></head>", cfg.DashboardURL), 1))
+	index = []byte(strings.Replace(string(index), "</head>", fmt.Sprintf("<script>window.__DASHBOARD_URL__=%q;window.__WAREHOUSECORE_URL__=%q</script></head>", cfg.DashboardURL, cfg.WarehouseURL), 1))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		normalizedPath := r.URL.Path
 		if normalizedPath == procurementMountPath {
