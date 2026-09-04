@@ -21,7 +21,7 @@ ProcurementCore ist der Einkaufs-Service des Cores-Ökosystems. Er verbindet Bed
 - Direkte Übernahme eines Procurement-Artikels in den vollständigen Warehouse-Produktdialog; erkannte Stammdaten und technische Attribute sind vorausgefüllt, bleiben aber bearbeitbar
 - Direktbestellungen, Lieferstatus, Teil- und Komplettwareneingänge
 - Spend-, Einsparungs- und Aktivitätsübersicht sowie CSV-Export
-- Gemeinsames Cores-SSO über `cores_token` mit zentralem Login und serviceübergreifendem Logout
+- Gemeinsames Cores-SSO über `cores_token` mit zentralem Login, validiertem Rücksprung zur zuvor geöffneten Procurement-Ansicht und serviceübergreifendem Logout
 - Zentrales Branding und responsive, dunkel gehaltene Cores-Oberfläche für Desktop und Mobilgeräte
 - Vollständiger ProcurementCore-Logosatz für helle/dunkle Flächen, kompakte Navigation, Login, Favicon und dynamisches PWA-Manifest über `/api/v1/branding`
 - Ein-/ausklappbare Desktop-Sidebar mit normierter Logo-/Symbolfläche, logofreiem App-Header und reinem Produkt-Favicon im Browser-Tab

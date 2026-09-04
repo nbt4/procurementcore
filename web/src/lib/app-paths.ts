@@ -31,6 +31,20 @@ export const dashboardURL = appBasePath
   ? "/"
   : browserWindow?.__DASHBOARD_URL__ || "/";
 
+export function centralLoginURL(): string {
+  const dashboard = new URL(dashboardURL, browserWindow?.location.origin || "http://localhost");
+  const login = new URL("/login", dashboard);
+  const localLoginPath = `${appBasePath}/login`;
+  const current = browserWindow?.location.pathname === localLoginPath
+    ? `${appBasePath || ""}/`
+    : `${browserWindow?.location.pathname || "/"}${browserWindow?.location.search || ""}${browserWindow?.location.hash || ""}`;
+  const target = dashboard.origin === browserWindow?.location.origin
+    ? current
+    : new URL(current, browserWindow?.location.origin || "http://localhost").toString();
+  login.searchParams.set("redirect", target);
+  return login.toString();
+}
+
 export const warehouseCoreURL =
   browserWindow?.__WAREHOUSECORE_URL__ ||
   (appBasePath ? "/warehousecore" : "http://localhost:8082");

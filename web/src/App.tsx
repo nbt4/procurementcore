@@ -30,7 +30,7 @@ import AlertsPage from "./pages/AlertsPage";
 import RequisitionsPage from "./pages/RequisitionsPage";
 import OrdersPage from "./pages/OrdersPage";
 import ProductLinksPage from "./pages/ProductLinksPage";
-import { appAssetPath, dashboardURL } from "./lib/app-paths";
+import { appAssetPath, centralLoginURL, dashboardURL } from "./lib/app-paths";
 
 type AppContextValue = {
   user: User;
@@ -87,18 +87,14 @@ function Shell({
   }, [sidebarExpanded]);
   const logout = async () => {
     setLoggingOut(true);
+    const loginURL = centralLoginURL();
     try {
       await fetch(`${apiBase}/auth/logout`, {
         method: "POST",
         credentials: "include",
       });
     } finally {
-      window.location.assign(
-        new URL(
-          "/login",
-          dashboardURL === "/" ? window.location.origin : dashboardURL,
-        ).toString(),
-      );
+      window.location.assign(loginURL);
     }
   };
   return (

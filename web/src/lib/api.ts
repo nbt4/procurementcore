@@ -1,4 +1,4 @@
-import { appPath, dashboardURL } from './app-paths'
+import { appPath, centralLoginURL } from './app-paths'
 
 export const apiBase = appPath('/api/v1')
 
@@ -9,8 +9,7 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
     headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
   })
   if (response.status === 401) {
-    const redirect = encodeURIComponent(window.location.pathname + window.location.search)
-    window.location.href = new URL(`/login?redirect=${redirect}`, dashboardURL === '/' ? window.location.origin : dashboardURL).toString()
+    window.location.href = centralLoginURL()
     throw new Error('Nicht angemeldet')
   }
   if (!response.ok) {
