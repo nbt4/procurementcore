@@ -23,6 +23,8 @@ github.com/mattn/go-isatty v0.0.20 h1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWE
 github.com/mattn/go-isatty v0.0.20/go.mod h1:W+V8PltTTMOvKvAeJH7IuucS94S2C6jfK/D7dTCTo3Y=
 github.com/nbt4/cores-common v1.1.0 h1:vohwQN6SfvC6COCQP6S8vVmY41q9803dzAhFlF2PdNA=
 github.com/nbt4/cores-common v1.1.0/go.mod h1:dAFPI5gVxjoTPfMTjEyMABrxcCBayXLr5lQihGGNUqQ=
+github.com/nbt4/cores-common v1.2.0 h1:KtbDMfLZ8kNBa2qfKnetVgd9cNFyFsPSxeTirnxgQ00=
+github.com/nbt4/cores-common v1.2.0/go.mod h1:dAFPI5gVxjoTPfMTjEyMABrxcCBayXLr5lQihGGNUqQ=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/rs/zerolog v1.35.1 h1:m7xQeoiLIiV0BCEY4Hs+j2NG4Gp2o2KPKmhnnLiazKI=

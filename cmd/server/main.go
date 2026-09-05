@@ -22,10 +22,11 @@ import (
 	"procurementcore/internal/scraper"
 
 	commonbranding "github.com/nbt4/cores-common/pkg/branding"
+	commonjwt "github.com/nbt4/cores-common/pkg/jwt"
 	"github.com/rs/zerolog"
 )
 
-const version = "1.0.27"
+const version = "1.0.28"
 
 const procurementMountPath = "/procurementcore"
 
@@ -111,7 +112,7 @@ func main() {
 		AdamHallUsername: cfg.AdamHallUsername,
 		AdamHallPassword: cfg.AdamHallPassword,
 	})
-	mux.Handle("/api/v1/", http.StripPrefix("/api/v1", auth.Middleware(api.NewHandler(db, productScraper).Routes())))
+	mux.Handle("/api/v1/", http.StripPrefix("/api/v1", auth.Middleware(commonjwt.DatabaseUserLookup(sqlDB), api.NewHandler(db, productScraper).Routes())))
 
 	mux.Handle("GET /assets/", assets)
 	mux.Handle("GET /procurementcore/assets/", http.StripPrefix(procurementMountPath, assets))

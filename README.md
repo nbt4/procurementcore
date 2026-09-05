@@ -1,5 +1,12 @@
 # ProcurementCore
 
+## Sitzungsprüfung (1.0.28)
+
+Cookie- und Bearer-Zugriffe verwenden `cores-common v1.2.0`, um den aktuellen
+Kontostatus und die Administratorrolle pro Anfrage zu prüfen. Gesperrte oder
+gelöschte Konten werden unmittelbar abgewiesen; Rollenänderungen gelten auch
+für bestehende Tokens. Datenbankfehler verweigern Zugriff.
+
 ## Einheitliches Cores Designsystem
 
 ProcurementCore verwendet das verbindliche Designsystem aus [`nbt4/cores`](https://github.com/nbt4/cores/blob/main/docs/DESIGN_SYSTEM.md). Die ehemalige separate Einkaufsakte-Palette wurde zugunsten der gemeinsamen Inter-Typografie, Graphitflächen, roten Primärfarbe, 256/80-px-Sidebar sowie identischer Tabellen-, Formular-, Dropdown-, Scrollbar- und Dashboard-Regeln abgelöst.

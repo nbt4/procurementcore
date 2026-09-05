@@ -19,7 +19,7 @@ type contextKey string
 
 const userKey contextKey = "procurement-user"
 
-func Middleware(next http.Handler) http.Handler {
+func Middleware(lookup commonjwt.UserLookup, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := ""
 		if cookie, err := r.Cookie("cores_token"); err == nil {
@@ -28,7 +28,7 @@ func Middleware(next http.Handler) http.Handler {
 		if token == "" && strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
 			token = strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		}
-		claims, ok := commonjwt.ValidateToken(token)
+		claims, ok := commonjwt.ValidateSession(r.Context(), token, commonjwt.JWTSecret(), lookup)
 		if !ok {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)

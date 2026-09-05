@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/go-chi/chi/v5 v5.2.3
-	github.com/nbt4/cores-common v1.1.0
+	github.com/nbt4/cores-common v1.2.0
 	github.com/rs/zerolog v1.35.1
 	golang.org/x/net v0.58.0
 	gorm.io/driver/postgres v1.6.0
