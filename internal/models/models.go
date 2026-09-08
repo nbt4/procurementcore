@@ -34,24 +34,29 @@ type Category struct {
 }
 
 type Product struct {
-	ID                 uint            `gorm:"primaryKey" json:"id"`
-	SKU                string          `gorm:"size:80;uniqueIndex;not null" json:"sku"`
-	Name               string          `gorm:"size:240;not null;index" json:"name"`
-	Description        string          `gorm:"type:text" json:"description"`
-	CategoryID         *uint           `gorm:"index" json:"categoryId"`
-	Category           *Category       `json:"category,omitempty"`
-	Unit               string          `gorm:"size:30;default:'Stk.'" json:"unit"`
-	Manufacturer       string          `gorm:"size:180;index" json:"manufacturer"`
-	Model              string          `gorm:"size:180" json:"model"`
-	Parameters         json.RawMessage `gorm:"type:jsonb;default:'{}';index:,type:gin" json:"parameters"`
-	Attributes         json.RawMessage `gorm:"type:jsonb;not null;default:'{}';index:,type:gin" json:"attributes"`
-	Active             bool            `gorm:"default:true;index" json:"active"`
-	ReorderPoint       float64         `json:"reorderPoint"`
-	TargetStock        float64         `json:"targetStock"`
-	CreatedAt          time.Time       `json:"createdAt"`
-	UpdatedAt          time.Time       `json:"updatedAt"`
-	Offers             []Offer         `json:"offers,omitempty"`
-	WarehouseProductID *int64          `gorm:"-" json:"warehouseProductId,omitempty"`
+	ID                     uint            `gorm:"primaryKey" json:"id"`
+	SKU                    string          `gorm:"size:80;uniqueIndex;not null" json:"sku"`
+	Name                   string          `gorm:"size:240;not null;index" json:"name"`
+	Description            string          `gorm:"type:text" json:"description"`
+	CategoryID             *uint           `gorm:"index" json:"categoryId"`
+	Category               *Category       `json:"category,omitempty"`
+	Unit                   string          `gorm:"size:30;default:'Stk.'" json:"unit"`
+	Manufacturer           string          `gorm:"size:180;index" json:"manufacturer"`
+	Model                  string          `gorm:"size:180" json:"model"`
+	Parameters             json.RawMessage `gorm:"type:jsonb;default:'{}';index:,type:gin" json:"parameters"`
+	Attributes             json.RawMessage `gorm:"type:jsonb;not null;default:'{}';index:,type:gin" json:"attributes"`
+	Active                 bool            `gorm:"default:true;index" json:"active"`
+	ReorderPoint           float64         `json:"reorderPoint"`
+	TargetStock            float64         `json:"targetStock"`
+	CreatedAt              time.Time       `json:"createdAt"`
+	UpdatedAt              time.Time       `json:"updatedAt"`
+	Offers                 []Offer         `json:"offers,omitempty"`
+	WarehouseProductID     *int64          `gorm:"-" json:"warehouseProductId,omitempty"`
+	WarehouseProductCode   string          `gorm:"-" json:"warehouseProductCode,omitempty"`
+	WarehouseProductName   string          `gorm:"-" json:"warehouseProductName,omitempty"`
+	WarehouseTrackingMode  string          `gorm:"-" json:"warehouseTrackingMode,omitempty"`
+	WarehouseStockQuantity float64         `gorm:"-" json:"warehouseStockQuantity,omitempty"`
+	WarehouseDeviceCount   int64           `gorm:"-" json:"warehouseDeviceCount,omitempty"`
 }
 
 // CoreProductLink is the suite-wide, one-to-one identity bridge. Product data
@@ -178,14 +183,19 @@ type PurchaseOrderLine struct {
 }
 
 type Receipt struct {
-	ID                  uint      `gorm:"primaryKey" json:"id"`
-	PurchaseOrderID     uint      `gorm:"not null;index" json:"purchaseOrderId"`
-	PurchaseOrderLineID uint      `gorm:"not null;index" json:"purchaseOrderLineId"`
-	Quantity            float64   `json:"quantity"`
-	ReceivedBy          uint      `json:"receivedBy"`
-	ReceivedByName      string    `gorm:"size:160" json:"receivedByName"`
-	Note                string    `gorm:"type:text" json:"note"`
-	ReceivedAt          time.Time `json:"receivedAt"`
+	ID                        uint      `gorm:"primaryKey" json:"id"`
+	PurchaseOrderID           uint      `gorm:"not null;index" json:"purchaseOrderId"`
+	PurchaseOrderLineID       uint      `gorm:"not null;index" json:"purchaseOrderLineId"`
+	Quantity                  float64   `json:"quantity"`
+	ReceivedBy                uint      `json:"receivedBy"`
+	ReceivedByName            string    `gorm:"size:160" json:"receivedByName"`
+	Note                      string    `gorm:"type:text" json:"note"`
+	WarehouseProductID        *int64    `gorm:"index" json:"warehouseProductId,omitempty"`
+	WarehouseTrackingMode     string    `gorm:"size:20" json:"warehouseTrackingMode,omitempty"`
+	WarehouseQuantityApplied  float64   `json:"warehouseQuantityApplied"`
+	WarehouseStockAfter       float64   `gorm:"-" json:"warehouseStockAfter,omitempty"`
+	WarehouseDeviceCountAfter int64     `gorm:"-" json:"warehouseDeviceCountAfter,omitempty"`
+	ReceivedAt                time.Time `json:"receivedAt"`
 }
 
 type Activity struct {

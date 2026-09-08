@@ -1,9 +1,12 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -17,6 +20,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type Handler struct {
@@ -414,10 +418,9 @@ func (h *Handler) getProduct(w http.ResponseWriter, r *http.Request) {
 		notFound(w)
 		return
 	}
-	var warehouseProductID int64
-	if err := h.db.Model(&models.CoreProductLink{}).Where("procurement_product_id = ?", row.ID).Pluck("warehouse_product_id", &warehouseProductID).Error; err == nil && warehouseProductID > 0 {
-		row.WarehouseProductID = &warehouseProductID
-	}
+	products := []models.Product{row}
+	h.hydrateWarehouseLinks(products)
+	row = products[0]
 	writeJSON(w, http.StatusOK, row)
 }
 
@@ -1012,6 +1015,23 @@ func (h *Handler) getOrder(w http.ResponseWriter, r *http.Request) {
 		notFound(w)
 		return
 	}
+	products := make([]models.Product, 0, len(row.Lines))
+	for i := range row.Lines {
+		if row.Lines[i].Product != nil {
+			products = append(products, *row.Lines[i].Product)
+		}
+	}
+	h.hydrateWarehouseLinks(products)
+	productsByID := make(map[uint]models.Product, len(products))
+	for _, product := range products {
+		productsByID[product.ID] = product
+	}
+	for i := range row.Lines {
+		if row.Lines[i].Product != nil {
+			product := productsByID[row.Lines[i].Product.ID]
+			row.Lines[i].Product = &product
+		}
+	}
 	writeJSON(w, http.StatusOK, row)
 }
 
@@ -1095,6 +1115,28 @@ func (h *Handler) updateOrder(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, row)
 }
 
+type receiptFlowError struct {
+	status  int
+	code    string
+	message string
+}
+
+func (err *receiptFlowError) Error() string { return err.message }
+
+func validateWarehouseReceipt(trackingMode string, quantity float64) *receiptFlowError {
+	switch trackingMode {
+	case "quantity", "none":
+		return nil
+	case "individual":
+		if math.Trunc(quantity) != quantity {
+			return &receiptFlowError{status: http.StatusBadRequest, code: "individual_quantity_required", message: "Für Einzelverfolgung muss die Eingangsmenge ganzzahlig sein"}
+		}
+		return nil
+	default:
+		return &receiptFlowError{status: http.StatusConflict, code: "warehouse_tracking_invalid", message: "Die Bestandsführung des Warehouse-Produkts ist ungültig"}
+	}
+}
+
 func (h *Handler) receiveOrder(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
@@ -1114,16 +1156,64 @@ func (h *Handler) receiveOrder(w http.ResponseWriter, r *http.Request) {
 	}
 	user := auth.CurrentUser(r)
 	var line models.PurchaseOrderLine
-	if err := h.db.Where("id = ? AND purchase_order_id = ?", input.LineID, id).First(&line).Error; err != nil {
-		notFound(w)
-		return
-	}
-	if line.ReceivedQuantity+input.Quantity > line.Quantity {
-		badRequest(w, "Wareneingang überschreitet Bestellmenge")
-		return
-	}
-	receipt := models.Receipt{PurchaseOrderID: id, PurchaseOrderLineID: line.ID, Quantity: input.Quantity, ReceivedBy: user.ID, ReceivedByName: user.Username, Note: input.Note, ReceivedAt: time.Now()}
+	receipt := models.Receipt{PurchaseOrderID: id, PurchaseOrderLineID: input.LineID, Quantity: input.Quantity, ReceivedBy: user.ID, ReceivedByName: user.Username, Note: input.Note, ReceivedAt: time.Now()}
 	err := h.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND purchase_order_id = ?", input.LineID, id).First(&line).Error; err != nil {
+			return err
+		}
+		if line.ReceivedQuantity+input.Quantity > line.Quantity {
+			return &receiptFlowError{status: http.StatusBadRequest, code: "ordered_quantity_exceeded", message: "Wareneingang überschreitet Bestellmenge"}
+		}
+		if line.ProductID != nil {
+			var warehouseProductID int64
+			var trackingMode string
+			scanErr := tx.Raw(`
+				SELECT p.productID,p.tracking_mode
+				FROM core_product_links cpl
+				JOIN products p ON p.productID=cpl.warehouse_product_id
+				WHERE cpl.procurement_product_id=? AND p.lifecycle_status='active'
+				FOR UPDATE OF p
+			`, *line.ProductID).Row().Scan(&warehouseProductID, &trackingMode)
+			if errors.Is(scanErr, sql.ErrNoRows) {
+				return &receiptFlowError{status: http.StatusConflict, code: "warehouse_product_required", message: "Produkt zuerst mit WarehouseCore verknüpfen oder dort neu anlegen"}
+			}
+			if scanErr != nil {
+				return scanErr
+			}
+			if validationErr := validateWarehouseReceipt(trackingMode, input.Quantity); validationErr != nil {
+				return validationErr
+			}
+			receipt.WarehouseProductID = &warehouseProductID
+			receipt.WarehouseTrackingMode = trackingMode
+			switch trackingMode {
+			case "quantity":
+				if err := tx.Exec(`
+					INSERT INTO product_locations(product_id,zone_id,quantity,updated_at)
+					VALUES(?,NULL,?,CURRENT_TIMESTAMP)
+					ON CONFLICT(product_id,zone_id) DO UPDATE
+					SET quantity=product_locations.quantity+EXCLUDED.quantity,updated_at=CURRENT_TIMESTAMP
+				`, warehouseProductID, input.Quantity).Error; err != nil {
+					return err
+				}
+				receipt.WarehouseQuantityApplied = input.Quantity
+				if err := tx.Raw("SELECT COALESCE(stock_quantity,0) FROM products WHERE productID=?", warehouseProductID).Scan(&receipt.WarehouseStockAfter).Error; err != nil {
+					return err
+				}
+			case "individual":
+				if err := tx.Exec(`
+					INSERT INTO devices(productID,status,condition_status,current_location)
+					SELECT ?,'location_unknown','available','location_unknown'
+					FROM generate_series(1,CAST(? AS BIGINT))
+				`, warehouseProductID, int64(input.Quantity)).Error; err != nil {
+					return err
+				}
+				receipt.WarehouseQuantityApplied = input.Quantity
+				if err := tx.Raw("SELECT COUNT(*) FROM devices WHERE productID=?", warehouseProductID).Scan(&receipt.WarehouseDeviceCountAfter).Error; err != nil {
+					return err
+				}
+			}
+		}
+		receipt.PurchaseOrderLineID = line.ID
 		line.ReceivedQuantity += input.Quantity
 		if err := tx.Save(&line).Error; err != nil {
 			return err
@@ -1140,10 +1230,23 @@ func (h *Handler) receiveOrder(w http.ResponseWriter, r *http.Request) {
 		return tx.Model(&models.PurchaseOrder{}).Where("id = ?", id).Update("status", status).Error
 	})
 	if err != nil {
+		var flowErr *receiptFlowError
+		if errors.As(err, &flowErr) {
+			writeJSON(w, flowErr.status, map[string]string{"error": flowErr.message, "code": flowErr.code})
+			return
+		}
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			notFound(w)
+			return
+		}
 		serverError(w, err)
 		return
 	}
-	h.activity(r, "purchase_order", id, "goods_received", fmt.Sprintf("line=%d quantity=%g", line.ID, input.Quantity))
+	details := fmt.Sprintf("line=%d quantity=%g", line.ID, input.Quantity)
+	if receipt.WarehouseProductID != nil {
+		details += fmt.Sprintf(" warehouse_product=%d tracking=%s applied=%g", *receipt.WarehouseProductID, receipt.WarehouseTrackingMode, receipt.WarehouseQuantityApplied)
+	}
+	h.activity(r, "purchase_order", id, "goods_received", details)
 	writeJSON(w, http.StatusCreated, receipt)
 }
 

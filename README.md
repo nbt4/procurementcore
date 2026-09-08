@@ -1,6 +1,16 @@
 # ProcurementCore
 
-## Sitzungsprüfung (1.0.28)
+## Wareneingang und Warehouse-Bestand (1.0.29)
+
+Wareneingänge für verknüpfte Katalogartikel aktualisieren WarehouseCore in
+derselben Datenbanktransaktion: Bei Mengenverfolgung wird der noch keinem
+Lagerplatz zugeordnete Bestand erhöht, bei Einzelverfolgung wird je empfangenem
+Stück ein Device angelegt. Fehlt die Verknüpfung, bietet der Wareneingangsdialog
+passende bestehende Warehouse-Produkte sowie die vorausgefüllte Neuanlage in
+WarehouseCore an und lässt sich danach direkt erneut prüfen. Freitextpositionen
+bleiben ohne automatische Inventarisierung buchbar.
+
+## Sitzungsprüfung
 
 Cookie- und Bearer-Zugriffe verwenden `cores-common v1.2.0`, um den aktuellen
 Kontostatus und die Administratorrolle pro Anfrage zu prüfen. Gesperrte oder
@@ -26,7 +36,7 @@ ProcurementCore ist der Einkaufs-Service des Cores-Ökosystems. Er verbindet Bed
 - Bedarfsmeldungen mit Entwurf, Einreichung, Freigabe, Ablehnung, Bestellkonvertierung und direkten Links von Katalogpositionen zum Artikel sowie zur hinterlegten Produktseite
 - Produktabgleich mit WarehouseCore: bestehende Artikel werden anhand EAN/GTIN, Herstellerartikelnummer, Modell, Hersteller und Name vorgeschlagen und anschließend eindeutig verknüpft
 - Direkte Übernahme eines Procurement-Artikels in den vollständigen Warehouse-Produktdialog; erkannte Stammdaten und technische Attribute sind vorausgefüllt, bleiben aber bearbeitbar
-- Direktbestellungen, Lieferstatus, Teil- und Komplettwareneingänge
+- Direktbestellungen, Lieferstatus sowie Teil- und Komplettwareneingänge mit transaktionaler Warehouse-Bestandsbuchung für verknüpfte Artikel
 - Spend-, Einsparungs- und Aktivitätsübersicht sowie CSV-Export
 - Gemeinsames Cores-SSO über `cores_token` mit zentralem Login, validiertem Rücksprung zur zuvor geöffneten Procurement-Ansicht und serviceübergreifendem Logout
 - Zentrales Branding und responsive, dunkel gehaltene Cores-Oberfläche für Desktop und Mobilgeräte
@@ -69,8 +79,8 @@ Im Gesamt-Stack läuft ProcurementCore als eigener Compose-Service auf Host-Port
 
 ## API
 
-Alle fachlichen Endpunkte liegen unter `/api/v1` und erwarten das gemeinsame SSO-Cookie oder einen Bearer-Token. Wichtige Ressourcen sind `/products`, `/product-links`, `/suppliers`, `/alerts`, `/requisitions`, `/orders`, `/dashboard` und `/export/spend.csv`. Über `/products/:id/warehouse-link` werden bestehende Produkte verknüpft oder wieder getrennt. `GET /health` und `GET /api/v1/branding` sind öffentlich.
+Alle fachlichen Endpunkte liegen unter `/api/v1` und erwarten das gemeinsame SSO-Cookie oder einen Bearer-Token. Wichtige Ressourcen sind `/products`, `/product-links`, `/suppliers`, `/alerts`, `/requisitions`, `/orders`, `/dashboard` und `/export/spend.csv`. Über `/products/:id/warehouse-link` werden bestehende Produkte verknüpft oder wieder getrennt. `POST /orders/:id/receipt` sperrt die Bestellposition, dokumentiert den Eingang und aktualisiert bei verknüpften Artikeln atomar Mengenbestand oder Devices in WarehouseCore. `GET /health` und `GET /api/v1/branding` sind öffentlich.
 
 ## Datenhaltung
 
-ProcurementCore verwendet die gemeinsame PostgreSQL-Instanz. Die Tabellen werden beim Start idempotent migriert; die prüfbare SQL-Basis liegt unter `migrations/`. `core_product_links` hält ausschließlich die eindeutige Zuordnung zwischen den eigenständig gepflegten Produktstämmen – es findet keine verdeckte Überschreibung von Warehouse-Werten statt. Geldwerte werden überall als Integer-Cent gespeichert.
+ProcurementCore verwendet die gemeinsame PostgreSQL-Instanz. Die Tabellen werden beim Start idempotent migriert; die prüfbare SQL-Basis liegt unter `migrations/`. `core_product_links` hält die eindeutige Zuordnung zwischen den eigenständig gepflegten Produktstämmen. Stammdaten bleiben in ihrem jeweiligen Core; nur ein ausdrücklich verbuchter Wareneingang schreibt den zugeordneten Warehouse-Bestand in derselben Transaktion fort. Die Receipt-Felder `warehouse_product_id`, `warehouse_tracking_mode` und `warehouse_quantity_applied` sichern die Zuordnung für das Audit. Geldwerte werden überall als Integer-Cent gespeichert.

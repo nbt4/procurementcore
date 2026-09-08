@@ -68,8 +68,12 @@ CREATE TABLE IF NOT EXISTS proc_purchase_order_lines (
 CREATE TABLE IF NOT EXISTS proc_receipts (
     id BIGSERIAL PRIMARY KEY, purchase_order_id BIGINT NOT NULL REFERENCES proc_purchase_orders(id),
     purchase_order_line_id BIGINT NOT NULL REFERENCES proc_purchase_order_lines(id), quantity DOUBLE PRECISION NOT NULL,
-    received_by BIGINT NOT NULL, received_by_name VARCHAR(160), note TEXT, received_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    received_by BIGINT NOT NULL, received_by_name VARCHAR(160), note TEXT,
+    warehouse_product_id BIGINT, warehouse_tracking_mode VARCHAR(20),
+    warehouse_quantity_applied DOUBLE PRECISION NOT NULL DEFAULT 0,
+    received_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+CREATE INDEX IF NOT EXISTS idx_proc_receipts_warehouse_product_id ON proc_receipts(warehouse_product_id);
 CREATE TABLE IF NOT EXISTS proc_activities (
     id BIGSERIAL PRIMARY KEY, entity_type VARCHAR(40) NOT NULL, entity_id BIGINT NOT NULL, action VARCHAR(80) NOT NULL,
     user_id BIGINT NOT NULL, username VARCHAR(160), details TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()

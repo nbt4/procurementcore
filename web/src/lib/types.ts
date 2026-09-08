@@ -88,6 +88,11 @@ export type Product = {
   targetStock: number;
   offers: Offer[];
   warehouseProductId?: number;
+  warehouseProductCode?: string;
+  warehouseProductName?: string;
+  warehouseTrackingMode?: "individual" | "quantity" | "none";
+  warehouseStockQuantity?: number;
+  warehouseDeviceCount?: number;
 };
 export type WarehouseProductCandidate = {
   productId: number;
@@ -98,6 +103,9 @@ export type WarehouseProductCandidate = {
   manufacturerPartNumber: string;
   ean: string;
   category: string;
+  trackingMode: "individual" | "quantity" | "none";
+  stockQuantity: number;
+  deviceCount: number;
   procurementProductId?: number;
   score: number;
   reasons: string[];

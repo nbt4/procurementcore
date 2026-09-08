@@ -1,14 +1,775 @@
-import { FormEvent, useEffect, useState } from 'react'
-import { ExternalLink, PackageCheck, Plus, Send, Truck, X } from 'lucide-react'
-import { api, date, euro } from '../lib/api'
-import type { Order, OrderLine, Product, Supplier } from '../lib/types'
-import { Badge, Button, Empty, Field, Modal } from '../components/ui'
-import { useApp } from '../App'
+import { FormEvent, useEffect, useState } from "react";
+import {
+  ExternalLink,
+  Link2,
+  PackageCheck,
+  Plus,
+  RefreshCw,
+  Send,
+  Truck,
+  X,
+} from "lucide-react";
+import { api, date, euro } from "../lib/api";
+import { warehouseProductsURL } from "../lib/app-paths";
+import type {
+  Order,
+  OrderLine,
+  Product,
+  Supplier,
+  WarehouseProductCandidate,
+} from "../lib/types";
+import { Badge, Button, Empty, Field, Modal } from "../components/ui";
+import { useApp } from "../App";
 
-const statusLabel:Record<string,string>={draft:'Entwurf',sent:'Gesendet',confirmed:'Bestätigt',partially_received:'Teileingang',received:'Empfangen',cancelled:'Storniert'}
-const tone=(s:string)=>s==='received'?'green':s==='partially_received'||s==='confirmed'?'blue':s==='sent'?'amber':s==='cancelled'?'red':''
-export default function OrdersPage(){const {user,refreshKey,refresh,notify}=useApp(),[rows,setRows]=useState<Order[]>([]),[suppliers,setSuppliers]=useState<Supplier[]>([]),[products,setProducts]=useState<Product[]>([]),[selected,setSelected]=useState<Order|null>(null),[create,setCreate]=useState(false),[receipt,setReceipt]=useState<{order:Order;line:OrderLine}|null>(null);useEffect(()=>{Promise.all([api<Order[]>('/orders'),api<Supplier[]>('/suppliers?active=true'),api<Product[]>('/products')]).then(([o,s,p])=>{setRows(o);setSuppliers(s);setProducts(p)})},[refreshKey]);const update=async(row:Order,status:string)=>{await api(`/orders/${row.id}`,{method:'PUT',body:JSON.stringify({status,expectedDelivery:row.expectedDelivery||null,notes:row.notes||''})});notify(`Status: ${statusLabel[status]}`);setSelected(null);refresh()};const open=async(id:number)=>setSelected(await api<Order>(`/orders/${id}`));return <div className="content"><div className="page-header"><div><h2>Bestellungen</h2><p>Bestellung auslösen, Liefertermine verfolgen und Wareneingänge verbuchen.</p></div>{user.isAdmin&&<Button variant="primary" onClick={()=>setCreate(true)}><Plus size={17}/> Direktbestellung</Button>}</div>{rows.length?<div className="table-wrap"><table><thead><tr><th>Nummer</th><th>Lieferant</th><th>Bestellt von</th><th>Liefertermin</th><th>Volumen</th><th>Status</th><th></th></tr></thead><tbody>{rows.map(row=><tr key={row.id}><td><span className="cell-title">{row.number}</span><div className="cell-sub">{date(row.createdAt)}</div></td><td>{row.supplier?.name}</td><td>{row.orderedByName}</td><td>{date(row.expectedDelivery)}</td><td>{euro(row.totalCents)}</td><td><Badge tone={tone(row.status)}>{statusLabel[row.status]||row.status}</Badge></td><td><Button variant="ghost" onClick={()=>open(row.id)}>Öffnen</Button></td></tr>)}</tbody></table></div>:<Empty>Noch keine Bestellungen vorhanden.</Empty>}{selected&&<Modal title={`${selected.number} · ${selected.supplier?.name}`} wide onClose={()=>setSelected(null)} footer={<><Button variant="ghost" onClick={()=>setSelected(null)}>Schließen</Button>{user.isAdmin&&selected.status==='draft'&&<Button variant="primary" onClick={()=>update(selected,'sent')}><Send size={16}/> Als gesendet markieren</Button>}{user.isAdmin&&selected.status==='sent'&&<Button variant="primary" onClick={()=>update(selected,'confirmed')}><Truck size={16}/> Bestätigt</Button>}{user.isAdmin&&!['received','cancelled'].includes(selected.status)&&<Button variant="danger" onClick={()=>update(selected,'cancelled')}>Stornieren</Button>}</>}><div className="form-grid"><Field label="Status"><Badge tone={tone(selected.status)}>{statusLabel[selected.status]}</Badge></Field><Field label="Erwartete Lieferung"><span>{date(selected.expectedDelivery)}</span></Field><Field label="Notizen" full><p>{selected.notes||'–'}</p></Field></div><div className="table-wrap"><table><thead><tr><th>Position</th><th>Bestellt</th><th>Empfangen</th><th>Preis</th><th></th></tr></thead><tbody>{selected.lines.map(line=><tr key={line.id}><td><span className="cell-title">{line.description}</span><div className="cell-sub">{line.product?.sku}</div></td><td>{line.quantity} {line.unit}</td><td>{line.receivedQuantity} {line.unit}</td><td>{euro(line.unitPriceCents)}</td><td><div className="row-actions">{line.purchaseUrl&&<a className="btn ghost icon" href={line.purchaseUrl} target="_blank" rel="noreferrer"><ExternalLink size={15}/></a>}{user.isAdmin&&line.receivedQuantity<line.quantity&&!['draft','cancelled'].includes(selected.status)&&<Button variant="primary" onClick={()=>setReceipt({order:selected,line})}><PackageCheck size={15}/> Eingang</Button>}</div></td></tr>)}</tbody></table></div></Modal>}{create&&<OrderModal suppliers={suppliers} products={products} onClose={()=>setCreate(false)} onSaved={()=>{setCreate(false);notify('Bestellung angelegt');refresh()}}/>}{receipt&&<ReceiptModal value={receipt} onClose={()=>setReceipt(null)} onSaved={()=>{setReceipt(null);setSelected(null);notify('Wareneingang verbucht');refresh()}}/>}</div>}
+const statusLabel: Record<string, string> = {
+  draft: "Entwurf",
+  sent: "Gesendet",
+  confirmed: "Bestätigt",
+  partially_received: "Teileingang",
+  received: "Empfangen",
+  cancelled: "Storniert",
+};
+const tone = (status: string) =>
+  status === "received"
+    ? "green"
+    : status === "partially_received" || status === "confirmed"
+      ? "blue"
+      : status === "sent"
+        ? "amber"
+        : status === "cancelled"
+          ? "red"
+          : "";
 
-function OrderModal({suppliers,products,onClose,onSaved}:{suppliers:Supplier[];products:Product[];onClose:()=>void;onSaved:()=>void}){const [supplierId,setSupplierId]=useState(0),[expected,setExpected]=useState(''),[notes,setNotes]=useState(''),[lines,setLines]=useState<OrderLine[]>([{description:'',quantity:1,receivedQuantity:0,unit:'Stk.',unitPriceCents:0,purchaseUrl:''}]),[error,setError]=useState('');const chooseProduct=(index:number,id:number)=>{const p=products.find(x=>x.id===id),offer=p?.offers?.filter(o=>!supplierId||o.supplierId===supplierId).sort((a,b)=>a.priceCents-b.priceCents)[0];setLines(ls=>ls.map((l,i)=>i===index?{...l,productId:p?.id,description:p?.name||'',unit:p?.unit||'Stk.',unitPriceCents:offer?.priceCents||0,purchaseUrl:offer?.purchaseUrl||''}:l))};const submit=async(e:FormEvent)=>{e.preventDefault();try{await api('/orders',{method:'POST',body:JSON.stringify({supplierId,status:'draft',currency:'EUR',expectedDelivery:expected?new Date(`${expected}T12:00:00`).toISOString():null,notes,lines})});onSaved()}catch(err){setError((err as Error).message)}};return <Modal title="Direktbestellung" wide onClose={onClose} footer={<><Button variant="ghost" onClick={onClose}>Abbrechen</Button><Button variant="primary" type="submit" form="order-form">Bestellung anlegen</Button></>}><form id="order-form" onSubmit={submit}>{error&&<div className="notice">{error}</div>}<div className="form-grid"><Field label="Lieferant"><select required value={supplierId} onChange={e=>setSupplierId(Number(e.target.value))}><option value="0">Bitte wählen</option>{suppliers.map(s=><option value={s.id} key={s.id}>{s.preferred?'★ ':''}{s.name}</option>)}</select></Field><Field label="Erwartete Lieferung"><input type="date" value={expected} onChange={e=>setExpected(e.target.value)}/></Field><Field label="Notizen" full><textarea value={notes} onChange={e=>setNotes(e.target.value)}/></Field></div><h4>Positionen</h4>{lines.map((line,index)=><div className="line-editor" key={index}><div className="field description"><label>Artikel / Beschreibung</label><select value={line.productId||''} onChange={e=>chooseProduct(index,Number(e.target.value))}><option value="">Freitext</option>{products.map(p=><option value={p.id} key={p.id}>{p.sku} · {p.name}</option>)}</select><input style={{marginTop:'.35rem'}} required value={line.description} onChange={e=>setLines(ls=>ls.map((x,i)=>i===index?{...x,description:e.target.value}:x))}/></div><Field label="Menge"><input type="number" min="0.01" step="0.01" value={line.quantity} onChange={e=>setLines(ls=>ls.map((x,i)=>i===index?{...x,quantity:Number(e.target.value)}:x))}/></Field><Field label="Einheit"><input value={line.unit} onChange={e=>setLines(ls=>ls.map((x,i)=>i===index?{...x,unit:e.target.value}:x))}/></Field><Field label="Preis EUR"><input type="number" min="0" step="0.01" value={line.unitPriceCents/100} onChange={e=>setLines(ls=>ls.map((x,i)=>i===index?{...x,unitPriceCents:Math.round(Number(e.target.value)*100)}:x))}/></Field><Button className="icon" variant="danger" type="button" onClick={()=>setLines(ls=>ls.filter((_,i)=>i!==index))}><X size={16}/></Button></div>)}<Button variant="ghost" type="button" onClick={()=>setLines(ls=>[...ls,{description:'',quantity:1,receivedQuantity:0,unit:'Stk.',unitPriceCents:0,purchaseUrl:''}])}><Plus size={15}/> Position</Button></form></Modal>}
+const trackingLabel = (mode?: string) =>
+  mode === "quantity"
+    ? "Mengenbestand"
+    : mode === "individual"
+      ? "Einzelverfolgung"
+      : "Keine Bestandsverfolgung";
 
-function ReceiptModal({value,onClose,onSaved}:{value:{order:Order;line:OrderLine};onClose:()=>void;onSaved:()=>void}){const remaining=value.line.quantity-value.line.receivedQuantity,[quantity,setQuantity]=useState(remaining),[note,setNote]=useState(''),[error,setError]=useState('');const submit=async(e:FormEvent)=>{e.preventDefault();try{await api(`/orders/${value.order.id}/receipt`,{method:'POST',body:JSON.stringify({lineId:value.line.id,quantity,note})});onSaved()}catch(err){setError((err as Error).message)}};return <Modal title="Wareneingang verbuchen" onClose={onClose} footer={<><Button variant="ghost" onClick={onClose}>Abbrechen</Button><Button variant="primary" type="submit" form="receipt-form">Verbuchen</Button></>}><form id="receipt-form" onSubmit={submit}>{error&&<div className="notice">{error}</div>}<p><strong>{value.line.description}</strong><br/><span style={{color:'var(--text-muted)'}}>Noch offen: {remaining} {value.line.unit}</span></p><div className="form-grid"><Field label="Eingangsmenge"><input type="number" min="0.01" max={remaining} step="0.01" value={quantity} onChange={e=>setQuantity(Number(e.target.value))}/></Field><Field label="Notiz"><input value={note} onChange={e=>setNote(e.target.value)}/></Field></div></form></Modal>}
+export function receiptInventoryMessage(product: Product, quantity: number) {
+  if (product.warehouseTrackingMode === "quantity") {
+    const current = product.warehouseStockQuantity || 0;
+    return `Der Warehouse-Mengenbestand steigt von ${current} auf ${current + quantity}.`;
+  }
+  if (product.warehouseTrackingMode === "individual") {
+    const current = product.warehouseDeviceCount || 0;
+    return `${quantity} neue Devices werden ohne Lagerplatz angelegt; danach sind ${current + quantity} Devices vorhanden.`;
+  }
+  return "Das Warehouse-Produkt führt keinen Bestand; der Eingang wird nur in ProcurementCore dokumentiert.";
+}
+
+export default function OrdersPage() {
+  const { user, refreshKey, refresh, notify } = useApp();
+  const [rows, setRows] = useState<Order[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [selected, setSelected] = useState<Order | null>(null);
+  const [create, setCreate] = useState(false);
+  const [receipt, setReceipt] = useState<{
+    order: Order;
+    line: OrderLine;
+  } | null>(null);
+
+  useEffect(() => {
+    Promise.all([
+      api<Order[]>("/orders"),
+      api<Supplier[]>("/suppliers?active=true"),
+      api<Product[]>("/products"),
+    ]).then(([orders, supplierRows, productRows]) => {
+      setRows(orders);
+      setSuppliers(supplierRows);
+      setProducts(productRows);
+    });
+  }, [refreshKey]);
+
+  const update = async (row: Order, status: string) => {
+    await api(`/orders/${row.id}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        status,
+        expectedDelivery: row.expectedDelivery || null,
+        notes: row.notes || "",
+      }),
+    });
+    notify(`Status: ${statusLabel[status]}`);
+    setSelected(null);
+    refresh();
+  };
+  const open = async (id: number) =>
+    setSelected(await api<Order>(`/orders/${id}`));
+
+  return (
+    <div className="content">
+      <div className="page-header">
+        <div>
+          <h2>Bestellungen</h2>
+          <p>
+            Bestellung auslösen, Liefertermine verfolgen und Wareneingänge
+            verbuchen.
+          </p>
+        </div>
+        {user.isAdmin && (
+          <Button variant="primary" onClick={() => setCreate(true)}>
+            <Plus size={17} /> Direktbestellung
+          </Button>
+        )}
+      </div>
+      {rows.length ? (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Nummer</th>
+                <th>Lieferant</th>
+                <th>Bestellt von</th>
+                <th>Liefertermin</th>
+                <th>Volumen</th>
+                <th>Status</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.id}>
+                  <td>
+                    <span className="cell-title">{row.number}</span>
+                    <div className="cell-sub">{date(row.createdAt)}</div>
+                  </td>
+                  <td>{row.supplier?.name}</td>
+                  <td>{row.orderedByName}</td>
+                  <td>{date(row.expectedDelivery)}</td>
+                  <td>{euro(row.totalCents)}</td>
+                  <td>
+                    <Badge tone={tone(row.status)}>
+                      {statusLabel[row.status] || row.status}
+                    </Badge>
+                  </td>
+                  <td>
+                    <Button variant="ghost" onClick={() => void open(row.id)}>
+                      Öffnen
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <Empty>Noch keine Bestellungen vorhanden.</Empty>
+      )}
+      {selected && (
+        <Modal
+          title={`${selected.number} · ${selected.supplier?.name}`}
+          wide
+          onClose={() => setSelected(null)}
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setSelected(null)}>
+                Schließen
+              </Button>
+              {user.isAdmin && selected.status === "draft" && (
+                <Button
+                  variant="primary"
+                  onClick={() => void update(selected, "sent")}
+                >
+                  <Send size={16} /> Als gesendet markieren
+                </Button>
+              )}
+              {user.isAdmin && selected.status === "sent" && (
+                <Button
+                  variant="primary"
+                  onClick={() => void update(selected, "confirmed")}
+                >
+                  <Truck size={16} /> Bestätigt
+                </Button>
+              )}
+              {user.isAdmin &&
+                !["received", "cancelled"].includes(selected.status) && (
+                  <Button
+                    variant="danger"
+                    onClick={() => void update(selected, "cancelled")}
+                  >
+                    Stornieren
+                  </Button>
+                )}
+            </>
+          }
+        >
+          <div className="form-grid">
+            <Field label="Status">
+              <Badge tone={tone(selected.status)}>
+                {statusLabel[selected.status]}
+              </Badge>
+            </Field>
+            <Field label="Erwartete Lieferung">
+              <span>{date(selected.expectedDelivery)}</span>
+            </Field>
+            <Field label="Notizen" full>
+              <p>{selected.notes || "–"}</p>
+            </Field>
+          </div>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Position</th>
+                  <th>Bestellt</th>
+                  <th>Empfangen</th>
+                  <th>Preis</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {selected.lines.map((line) => (
+                  <tr key={line.id}>
+                    <td>
+                      <span className="cell-title">{line.description}</span>
+                      <div className="cell-sub">{line.product?.sku}</div>
+                    </td>
+                    <td>
+                      {line.quantity} {line.unit}
+                    </td>
+                    <td>
+                      {line.receivedQuantity} {line.unit}
+                    </td>
+                    <td>{euro(line.unitPriceCents)}</td>
+                    <td>
+                      <div className="row-actions">
+                        {line.purchaseUrl && (
+                          <a
+                            className="btn ghost icon"
+                            href={line.purchaseUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            <ExternalLink size={15} />
+                          </a>
+                        )}
+                        {user.isAdmin &&
+                          line.receivedQuantity < line.quantity &&
+                          !["draft", "cancelled"].includes(selected.status) && (
+                            <Button
+                              variant="primary"
+                              onClick={() => setReceipt({ order: selected, line })}
+                            >
+                              <PackageCheck size={15} /> Eingang
+                            </Button>
+                          )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Modal>
+      )}
+      {create && (
+        <OrderModal
+          suppliers={suppliers}
+          products={products}
+          onClose={() => setCreate(false)}
+          onSaved={() => {
+            setCreate(false);
+            notify("Bestellung angelegt");
+            refresh();
+          }}
+        />
+      )}
+      {receipt && (
+        <ReceiptModal
+          value={receipt}
+          onClose={() => setReceipt(null)}
+          onSaved={() => {
+            setReceipt(null);
+            setSelected(null);
+            notify("Wareneingang verbucht");
+            refresh();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function OrderModal({
+  suppliers,
+  products,
+  onClose,
+  onSaved,
+}: {
+  suppliers: Supplier[];
+  products: Product[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [supplierId, setSupplierId] = useState(0);
+  const [expected, setExpected] = useState("");
+  const [notes, setNotes] = useState("");
+  const [lines, setLines] = useState<OrderLine[]>([
+    {
+      description: "",
+      quantity: 1,
+      receivedQuantity: 0,
+      unit: "Stk.",
+      unitPriceCents: 0,
+      purchaseUrl: "",
+    },
+  ]);
+  const [error, setError] = useState("");
+
+  const chooseProduct = (index: number, id: number) => {
+    const product = products.find((item) => item.id === id);
+    const offer = product?.offers
+      ?.filter((item) => !supplierId || item.supplierId === supplierId)
+      .sort((left, right) => left.priceCents - right.priceCents)[0];
+    setLines((current) =>
+      current.map((line, lineIndex) =>
+        lineIndex === index
+          ? {
+              ...line,
+              productId: product?.id,
+              description: product?.name || "",
+              unit: product?.unit || "Stk.",
+              unitPriceCents: offer?.priceCents || 0,
+              purchaseUrl: offer?.purchaseUrl || "",
+            }
+          : line,
+      ),
+    );
+  };
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    try {
+      await api("/orders", {
+        method: "POST",
+        body: JSON.stringify({
+          supplierId,
+          status: "draft",
+          currency: "EUR",
+          expectedDelivery: expected
+            ? new Date(`${expected}T12:00:00`).toISOString()
+            : null,
+          notes,
+          lines,
+        }),
+      });
+      onSaved();
+    } catch (caught) {
+      setError((caught as Error).message);
+    }
+  };
+
+  return (
+    <Modal
+      title="Direktbestellung"
+      wide
+      onClose={onClose}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Abbrechen
+          </Button>
+          <Button variant="primary" type="submit" form="order-form">
+            Bestellung anlegen
+          </Button>
+        </>
+      }
+    >
+      <form id="order-form" onSubmit={submit}>
+        {error && <div className="notice">{error}</div>}
+        <div className="form-grid">
+          <Field label="Lieferant">
+            <select
+              required
+              value={supplierId}
+              onChange={(event) => setSupplierId(Number(event.target.value))}
+            >
+              <option value="0">Bitte wählen</option>
+              {suppliers.map((supplier) => (
+                <option value={supplier.id} key={supplier.id}>
+                  {supplier.preferred ? "★ " : ""}
+                  {supplier.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Erwartete Lieferung">
+            <input
+              type="date"
+              value={expected}
+              onChange={(event) => setExpected(event.target.value)}
+            />
+          </Field>
+          <Field label="Notizen" full>
+            <textarea
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+            />
+          </Field>
+        </div>
+        <h4>Positionen</h4>
+        {lines.map((line, index) => (
+          <div className="line-editor" key={index}>
+            <div className="field description">
+              <label>Artikel / Beschreibung</label>
+              <select
+                value={line.productId || ""}
+                onChange={(event) =>
+                  chooseProduct(index, Number(event.target.value))
+                }
+              >
+                <option value="">Freitext</option>
+                {products.map((product) => (
+                  <option value={product.id} key={product.id}>
+                    {product.sku} · {product.name}
+                  </option>
+                ))}
+              </select>
+              <input
+                style={{ marginTop: ".35rem" }}
+                required
+                value={line.description}
+                onChange={(event) =>
+                  setLines((current) =>
+                    current.map((item, lineIndex) =>
+                      lineIndex === index
+                        ? { ...item, description: event.target.value }
+                        : item,
+                    ),
+                  )
+                }
+              />
+            </div>
+            <Field label="Menge">
+              <input
+                type="number"
+                min="0.01"
+                step="0.01"
+                value={line.quantity}
+                onChange={(event) =>
+                  setLines((current) =>
+                    current.map((item, lineIndex) =>
+                      lineIndex === index
+                        ? { ...item, quantity: Number(event.target.value) }
+                        : item,
+                    ),
+                  )
+                }
+              />
+            </Field>
+            <Field label="Einheit">
+              <input
+                value={line.unit}
+                onChange={(event) =>
+                  setLines((current) =>
+                    current.map((item, lineIndex) =>
+                      lineIndex === index
+                        ? { ...item, unit: event.target.value }
+                        : item,
+                    ),
+                  )
+                }
+              />
+            </Field>
+            <Field label="Preis EUR">
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={line.unitPriceCents / 100}
+                onChange={(event) =>
+                  setLines((current) =>
+                    current.map((item, lineIndex) =>
+                      lineIndex === index
+                        ? {
+                            ...item,
+                            unitPriceCents: Math.round(
+                              Number(event.target.value) * 100,
+                            ),
+                          }
+                        : item,
+                    ),
+                  )
+                }
+              />
+            </Field>
+            <Button
+              className="icon"
+              variant="danger"
+              type="button"
+              onClick={() =>
+                setLines((current) =>
+                  current.filter((_, lineIndex) => lineIndex !== index),
+                )
+              }
+            >
+              <X size={16} />
+            </Button>
+          </div>
+        ))}
+        <Button
+          variant="ghost"
+          type="button"
+          onClick={() =>
+            setLines((current) => [
+              ...current,
+              {
+                description: "",
+                quantity: 1,
+                receivedQuantity: 0,
+                unit: "Stk.",
+                unitPriceCents: 0,
+                purchaseUrl: "",
+              },
+            ])
+          }
+        >
+          <Plus size={15} /> Position
+        </Button>
+      </form>
+    </Modal>
+  );
+}
+
+function ReceiptModal({
+  value,
+  onClose,
+  onSaved,
+}: {
+  value: { order: Order; line: OrderLine };
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const remaining = value.line.quantity - value.line.receivedQuantity;
+  const procurementProduct = value.line.product;
+  const [quantity, setQuantity] = useState(remaining);
+  const [note, setNote] = useState("");
+  const [error, setError] = useState("");
+  const [warehouseProduct, setWarehouseProduct] = useState<Product | null>(
+    procurementProduct?.warehouseProductId ? procurementProduct : null,
+  );
+  const [candidates, setCandidates] = useState<WarehouseProductCandidate[]>([]);
+  const [selectedCandidate, setSelectedCandidate] = useState(0);
+  const [checking, setChecking] = useState(false);
+  const [linking, setLinking] = useState(false);
+  const requiresWarehouseLink = Boolean(procurementProduct);
+  const canSubmit = !requiresWarehouseLink || Boolean(warehouseProduct);
+
+  const checkWarehouseLink = async () => {
+    if (!procurementProduct) return;
+    setChecking(true);
+    setError("");
+    try {
+      const refreshed = await api<Product>(`/products/${procurementProduct.id}`);
+      if (refreshed.warehouseProductId) {
+        setWarehouseProduct(refreshed);
+        setCandidates([]);
+        setSelectedCandidate(0);
+      } else {
+        const matches = await api<WarehouseProductCandidate[]>(
+          `/products/${procurementProduct.id}/warehouse-candidates`,
+        );
+        setWarehouseProduct(null);
+        setCandidates(matches);
+        setSelectedCandidate(matches[0]?.productId || 0);
+      }
+    } catch (caught) {
+      setError((caught as Error).message);
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  useEffect(() => {
+    if (procurementProduct && !procurementProduct.warehouseProductId) {
+      void checkWarehouseLink();
+    }
+    // The receipt target does not change while this modal is mounted.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [procurementProduct?.id]);
+
+  const linkCandidate = async () => {
+    if (!procurementProduct || !selectedCandidate) return;
+    setLinking(true);
+    setError("");
+    try {
+      await api(`/products/${procurementProduct.id}/warehouse-link`, {
+        method: "POST",
+        body: JSON.stringify({ warehouseProductId: selectedCandidate }),
+      });
+      await checkWarehouseLink();
+    } catch (caught) {
+      setError((caught as Error).message);
+    } finally {
+      setLinking(false);
+    }
+  };
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!canSubmit) return;
+    try {
+      await api(`/orders/${value.order.id}/receipt`, {
+        method: "POST",
+        body: JSON.stringify({ lineId: value.line.id, quantity, note }),
+      });
+      onSaved();
+    } catch (caught) {
+      setError((caught as Error).message);
+    }
+  };
+
+  const individual = warehouseProduct?.warehouseTrackingMode === "individual";
+  return (
+    <Modal
+      title="Wareneingang verbuchen"
+      onClose={onClose}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Abbrechen
+          </Button>
+          <Button
+            variant="primary"
+            type="submit"
+            form="receipt-form"
+            disabled={!canSubmit}
+          >
+            Verbuchen
+          </Button>
+        </>
+      }
+    >
+      <form id="receipt-form" onSubmit={submit}>
+        {error && <div className="notice">{error}</div>}
+        <p>
+          <strong>{value.line.description}</strong>
+          <br />
+          <span style={{ color: "var(--text-muted)" }}>
+            Noch offen: {remaining} {value.line.unit}
+          </span>
+        </p>
+
+        {!procurementProduct && (
+          <div className="receipt-inventory">
+            <strong>Freitextposition</strong>
+            <span>
+              Der Eingang wird dokumentiert, aber keinem Warehouse-Produkt
+              zugeordnet.
+            </span>
+          </div>
+        )}
+
+        {procurementProduct && warehouseProduct && (
+          <div className="receipt-inventory">
+            <div className="receipt-inventory-heading">
+              <div>
+                <strong>{warehouseProduct.warehouseProductName}</strong>
+                <span>{warehouseProduct.warehouseProductCode}</span>
+              </div>
+              <Badge tone="green">
+                {trackingLabel(warehouseProduct.warehouseTrackingMode)}
+              </Badge>
+            </div>
+            <p>{receiptInventoryMessage(warehouseProduct, quantity)}</p>
+            <a
+              className="btn ghost"
+              href={warehouseProductsURL({
+                product_id: warehouseProduct.warehouseProductId!,
+              })}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <ExternalLink size={15} /> Warehouse-Produkt öffnen
+            </a>
+          </div>
+        )}
+
+        {procurementProduct && !warehouseProduct && (
+          <div className="receipt-inventory">
+            <div className="receipt-inventory-heading">
+              <div>
+                <strong>Warehouse-Produkt fehlt</strong>
+                <span>
+                  Vor dem Verbuchen ein bestehendes Produkt verknüpfen oder neu
+                  anlegen.
+                </span>
+              </div>
+              <Button
+                className="icon"
+                variant="ghost"
+                type="button"
+                onClick={() => void checkWarehouseLink()}
+                disabled={checking}
+                aria-label="Warehouse-Verknüpfung erneut prüfen"
+                title="Erneut prüfen"
+              >
+                <RefreshCw className={checking ? "spin" : ""} size={15} />
+              </Button>
+            </div>
+            {candidates.length > 0 && (
+              <div className="receipt-link-row">
+                <select
+                  aria-label="Bestehendes Warehouse-Produkt"
+                  value={selectedCandidate}
+                  onChange={(event) =>
+                    setSelectedCandidate(Number(event.target.value))
+                  }
+                >
+                  {candidates.map((candidate) => (
+                    <option value={candidate.productId} key={candidate.productId}>
+                      {candidate.productCode} · {candidate.name} · {candidate.score}
+                      Punkte
+                    </option>
+                  ))}
+                </select>
+                <Button
+                  variant="ghost"
+                  type="button"
+                  disabled={!selectedCandidate || linking}
+                  onClick={() => void linkCandidate()}
+                >
+                  <Link2 size={15} /> {linking ? "Wird verknüpft …" : "Verknüpfen"}
+                </Button>
+              </div>
+            )}
+            {candidates.length === 0 && !checking && (
+              <span>Kein passender bestehender Artikel erkannt.</span>
+            )}
+            <a
+              className="btn primary"
+              href={warehouseProductsURL({
+                procurement_product_id: procurementProduct.id,
+              })}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <ExternalLink size={15} /> Produkt in WarehouseCore anlegen
+            </a>
+          </div>
+        )}
+
+        <div className="form-grid">
+          <Field label="Eingangsmenge">
+            <input
+              type="number"
+              min={individual ? 1 : 0.01}
+              max={remaining}
+              step={individual ? 1 : 0.01}
+              value={quantity}
+              onChange={(event) => setQuantity(Number(event.target.value))}
+            />
+          </Field>
+          <Field label="Notiz">
+            <input
+              value={note}
+              onChange={(event) => setNote(event.target.value)}
+            />
+          </Field>
+        </div>
+      </form>
+    </Modal>
+  );
+}

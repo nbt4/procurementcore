@@ -2,12 +2,44 @@ package api
 
 import (
 	"encoding/json"
+	"net/http"
 	"net/url"
 	"reflect"
 	"testing"
 
 	"procurementcore/internal/models"
 )
+
+func TestValidateWarehouseReceipt(t *testing.T) {
+	tests := []struct {
+		name         string
+		trackingMode string
+		quantity     float64
+		wantStatus   int
+		wantCode     string
+	}{
+		{name: "quantity accepts fractions", trackingMode: "quantity", quantity: 2.5},
+		{name: "individual accepts whole devices", trackingMode: "individual", quantity: 8},
+		{name: "untracked accepts receipt", trackingMode: "none", quantity: 3},
+		{name: "individual rejects fractions", trackingMode: "individual", quantity: 1.5, wantStatus: http.StatusBadRequest, wantCode: "individual_quantity_required"},
+		{name: "unknown mode is blocked", trackingMode: "legacy", quantity: 1, wantStatus: http.StatusConflict, wantCode: "warehouse_tracking_invalid"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateWarehouseReceipt(test.trackingMode, test.quantity)
+			if test.wantCode == "" {
+				if err != nil {
+					t.Fatalf("validateWarehouseReceipt() error = %v", err)
+				}
+				return
+			}
+			if err == nil || err.status != test.wantStatus || err.code != test.wantCode {
+				t.Fatalf("validateWarehouseReceipt() error = %#v, want status=%d code=%q", err, test.wantStatus, test.wantCode)
+			}
+		})
+	}
+}
 
 func TestParseProductFilter(t *testing.T) {
 	values := url.Values{

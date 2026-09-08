@@ -19,6 +19,17 @@ ProcurementCore verwendet den gemeinsamen Dashboard-Vertrag in dieser Ausprägun
 - Katalogparameter und Einkaufsstatus dürfen kompakt dargestellt werden, verändern aber weder Typografie-Leiter noch Tabellen- oder Formularstruktur.
 - Die frühere Petrol-/Aptos-Palette und besonders kleinen 2–9-px-Radien sind außer Kraft.
 
+## Wareneingang
+
+Der Wareneingangsdialog zeigt vor der Buchung die Warehouse-Zuordnung und die
+Auswirkung der Eingangsmenge. Bei Mengenführung werden alter und neuer Bestand,
+bei Einzelverfolgung die Zahl der neu entstehenden und anschließend vorhandenen
+Devices genannt. Fehlt die Zuordnung, bleibt die Buchungsaktion deaktiviert;
+der Dialog bietet erkannte Warehouse-Produkte zum Verknüpfen sowie die
+vorausgefüllte Neuanlage an. Lade-, Fehler- und Leerezustand bleiben im Dialog
+sichtbar und die Verknüpfung kann nach einer externen Neuanlage erneut geprüft
+werden. Auf schmalen Viewports stehen Auswahl und Aktionen untereinander.
+
 ## Implementierung
 
 `web/src/cores-theme.css` und `web/src/lib/cores-design.ts` sind generierte Dateien. Änderungen erfolgen in den kanonischen Quellen des Umbrella-Repositories und werden dort synchronisiert und geprüft. Lokale Komponenten verwenden die `suite-*`-Primitives und dürfen sie nur fachlich ergänzen.

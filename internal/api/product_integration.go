@@ -21,6 +21,9 @@ type warehouseProductCandidate struct {
 	ManufacturerSKU string   `json:"manufacturerPartNumber" gorm:"column:manufacturer_part_number"`
 	EAN             string   `json:"ean"`
 	Category        string   `json:"category"`
+	TrackingMode    string   `json:"trackingMode" gorm:"column:tracking_mode"`
+	StockQuantity   float64  `json:"stockQuantity" gorm:"column:stock_quantity"`
+	DeviceCount     int64    `json:"deviceCount" gorm:"column:device_count"`
 	ProcurementID   *uint    `json:"procurementProductId,omitempty" gorm:"column:procurement_product_id"`
 	Score           int      `json:"score" gorm:"-"`
 	Reasons         []string `json:"reasons" gorm:"-"`
@@ -119,6 +122,8 @@ func (h *Handler) warehouseProducts() ([]warehouseProductCandidate, error) {
 		       COALESCE(m.name,'') AS manufacturer,COALESCE(p.model_number,'') AS model,
 		       COALESCE(p.manufacturer_part_number,'') AS manufacturer_part_number,
 		       COALESCE(p.ean,'') AS ean,COALESCE(c.name,'') AS category,
+		       p.tracking_mode,COALESCE(p.stock_quantity,0) AS stock_quantity,
+		       (SELECT COUNT(*) FROM devices d WHERE d.productID=p.productID) AS device_count,
 		       cpl.procurement_product_id
 		FROM products p
 		LEFT JOIN manufacturer m ON m.manufacturerid=p.manufacturerid
@@ -138,18 +143,40 @@ func (h *Handler) hydrateWarehouseLinks(products []models.Product) {
 	for i := range products {
 		ids = append(ids, products[i].ID)
 	}
-	var links []models.CoreProductLink
-	if h.db.Where("procurement_product_id IN ?", ids).Find(&links).Error != nil {
+	type warehouseLink struct {
+		ProcurementProductID uint    `gorm:"column:procurement_product_id"`
+		WarehouseProductID   int64   `gorm:"column:warehouse_product_id"`
+		ProductCode          string  `gorm:"column:product_code"`
+		Name                 string  `gorm:"column:name"`
+		TrackingMode         string  `gorm:"column:tracking_mode"`
+		StockQuantity        float64 `gorm:"column:stock_quantity"`
+		DeviceCount          int64   `gorm:"column:device_count"`
+	}
+	var links []warehouseLink
+	if err := h.db.Raw(`
+		SELECT cpl.procurement_product_id,cpl.warehouse_product_id,
+		       COALESCE(p.product_code,'') AS product_code,p.name,p.tracking_mode,
+		       COALESCE(p.stock_quantity,0) AS stock_quantity,
+		       (SELECT COUNT(*) FROM devices d WHERE d.productID=p.productID) AS device_count
+		FROM core_product_links cpl
+		JOIN products p ON p.productID=cpl.warehouse_product_id
+		WHERE cpl.procurement_product_id IN ? AND p.lifecycle_status='active'
+	`, ids).Scan(&links).Error; err != nil {
 		return
 	}
-	byProcurement := map[uint]int64{}
+	byProcurement := map[uint]warehouseLink{}
 	for _, link := range links {
-		byProcurement[link.ProcurementProductID] = link.WarehouseProductID
+		byProcurement[link.ProcurementProductID] = link
 	}
 	for i := range products {
-		if id, ok := byProcurement[products[i].ID]; ok {
-			value := id
+		if link, ok := byProcurement[products[i].ID]; ok {
+			value := link.WarehouseProductID
 			products[i].WarehouseProductID = &value
+			products[i].WarehouseProductCode = link.ProductCode
+			products[i].WarehouseProductName = link.Name
+			products[i].WarehouseTrackingMode = link.TrackingMode
+			products[i].WarehouseStockQuantity = link.StockQuantity
+			products[i].WarehouseDeviceCount = link.DeviceCount
 		}
 	}
 }
