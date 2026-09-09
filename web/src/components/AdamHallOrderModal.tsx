@@ -1,11 +1,21 @@
 import { useEffect, useState } from "react";
-import { AlertCircle, RefreshCw, ShoppingCart } from "lucide-react";
+import { AlertCircle, ExternalLink, RefreshCw, ShoppingCart } from "lucide-react";
 import { api } from "../lib/api";
 import type { AdamHallCart, AdamHallOrderResult, Order, Supplier } from "../lib/types";
 import { Button, Field, Modal } from "./ui";
 
 const money = (cents: number, currency: string) =>
   new Intl.NumberFormat("de-DE", { style: "currency", currency: currency || "EUR" }).format(cents / 100);
+
+export const ADAM_HALL_CART_URL = "https://www.adamhall.com/shop/de/checkout/cart";
+
+export function AdamHallCartLink() {
+  return (
+    <a className="btn ghost" href={ADAM_HALL_CART_URL} target="_blank" rel="noopener noreferrer">
+      <ExternalLink size={16} /> Warenkorb bei Adam Hall öffnen
+    </a>
+  );
+}
 
 export function isAdamHallSupplier(supplier?: Supplier) {
   if (!supplier) return false;
@@ -91,6 +101,10 @@ export default function AdamHallOrderModal({
             <Field label="Versandart"><span>{cart.shippingMethod || "Standardversand"}</span></Field>
             <Field label="Lieferadresse" full><span>{cart.shippingAddress || "Im Adam-Hall-Konto hinterlegte Standardadresse"}</span></Field>
           </div>
+          <div className="catalog-actions">
+            <AdamHallCartLink />
+          </div>
+          <p className="cell-sub">Adam Hall kann im neuen Tab die Anmeldung am selben Geschäftskonto verlangen.</p>
           <div className="table-wrap">
             <table>
               <thead><tr><th>Artikel</th><th>Menge</th><th>Einzelpreis</th><th>Summe</th></tr></thead>

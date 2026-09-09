@@ -1,6 +1,8 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { Product } from "../lib/types";
-import { isAdamHallSupplier } from "../components/AdamHallOrderModal";
+import { ADAM_HALL_CART_URL, AdamHallCartLink, isAdamHallSupplier } from "../components/AdamHallOrderModal";
 import { receiptInventoryMessage } from "./OrdersPage";
 
 const product = (values: Partial<Product>): Product =>
@@ -61,5 +63,16 @@ describe("isAdamHallSupplier", () => {
 
   it("rejects lookalike hosts", () => {
     expect(isAdamHallSupplier(supplier({ website: "https://adamhall.com.example.org" }))).toBe(false);
+  });
+});
+
+describe("AdamHallCartLink", () => {
+  it("opens the official cart safely in a new tab", () => {
+    const markup = renderToStaticMarkup(createElement(AdamHallCartLink));
+
+    expect(ADAM_HALL_CART_URL).toBe("https://www.adamhall.com/shop/de/checkout/cart");
+    expect(markup).toContain(`href="${ADAM_HALL_CART_URL}"`);
+    expect(markup).toContain('target="_blank"');
+    expect(markup).toContain('rel="noopener noreferrer"');
   });
 });

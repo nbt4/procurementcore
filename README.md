@@ -1,5 +1,12 @@
 # ProcurementCore
 
+## Adam-Hall-Warenkorb im Shop öffnen (1.0.33)
+
+Nach dem erfolgreichen Aufbau eines Adam-Hall-Warenkorbs kann dieser direkt im
+offiziellen Adam-Hall-Shop geöffnet werden. Der Link öffnet einen neuen Tab und
+weist darauf hin, dass dort gegebenenfalls die Anmeldung am selben
+Geschäftskonto erforderlich ist; serverseitige Zugangsdaten bleiben geschützt.
+
 ## Zuverlässiger Adam-Hall-Warenkorb (1.0.32)
 
 Jede Vorschau ersetzt jetzt den bestehenden Adam-Hall-Warenkorb, statt neue
@@ -62,7 +69,7 @@ ProcurementCore ist der Einkaufs-Service des Cores-Ökosystems. Er verbindet Bed
 - Mehrere Angebote pro Artikel mit Einkaufslink, Mindestmenge, Packgröße und Preisverlauf
 - Tiefpreis-Alarme, die bei neuen oder geänderten Angeboten automatisch auslösen
 - Bedarfsmeldungen mit Entwurf, Einreichung, Freigabe, Ablehnung, Bestellkonvertierung und direkten Links von Katalogpositionen zum Artikel sowie zur hinterlegten Produktseite
-- Server-seitig erzeugte Adam-Hall-Warenkörbe für freigegebene Bedarfe und Bestellungsentwürfe: Konto, Lieferadresse, Zahlungsart, Positionen und Live-Gesamtpreis werden vor der verbindlichen Übertragung geprüft; die Adam-Hall-Bestellnummer und finalen Preise fließen zurück in ProcurementCore
+- Server-seitig erzeugte Adam-Hall-Warenkörbe für freigegebene Bedarfe und Bestellungsentwürfe: Konto, Lieferadresse, Zahlungsart, Positionen und Live-Gesamtpreis werden vor der verbindlichen Übertragung geprüft; der Warenkorb lässt sich zusätzlich im offiziellen Shop öffnen, und die Adam-Hall-Bestellnummer sowie finalen Preise fließen zurück in ProcurementCore
 - Produktabgleich mit WarehouseCore: bestehende Artikel werden anhand EAN/GTIN, Herstellerartikelnummer, Modell, Hersteller und Name vorgeschlagen und anschließend eindeutig verknüpft
 - Direkte Übernahme eines Procurement-Artikels in den vollständigen Warehouse-Produktdialog; erkannte Stammdaten und technische Attribute sind vorausgefüllt, bleiben aber bearbeitbar
 - Direktbestellungen, Lieferstatus sowie Teil- und Komplettwareneingänge mit transaktionaler Warehouse-Bestandsbuchung für verknüpfte Artikel
