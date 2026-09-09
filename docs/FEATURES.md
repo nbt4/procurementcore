@@ -12,7 +12,7 @@ Die erste Version übernimmt die wiederkehrenden Kernmuster etablierter Procurem
 4. Katalog: Kategorien mit dynamischem Parameterschema und exakten Parameterfiltern.
 5. Preise: Angebote je Lieferant, Preisverlauf, Mindestmengen, Packgrößen und Einkaufslinks.
 6. Tiefpreis: persönliche Zielpreise und automatische Auslösung bei passendem Angebot.
-7. Bestellen: Bedarf in Bestellung umwandeln oder Direktbestellung anlegen.
+7. Bestellen: Bedarf in Bestellung umwandeln oder Direktbestellung anlegen; Adam-Hall-Entwürfe als serverseitigen Live-Warenkorb mit Konto-, Liefer-, Zahlungs- und Preisprüfung öffnen und nach expliziter Bestätigung verbindlich übertragen.
 8. Empfangen: Teil- und Komplettwareneingänge mit Mengenprüfung.
 9. Steuern: Spend, Einsparungen, offene Freigaben, Preisalarme, Aktivitätslog und CSV-Export.
 10. Plattform: Cores-SSO, Adminrechte, Branding, Dashboard, Healthcheck, Docker und PostgreSQL.

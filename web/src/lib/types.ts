@@ -200,6 +200,26 @@ export type Order = {
   createdAt: string;
   lines: OrderLine[];
 };
+export type AdamHallCartLine = {
+  productNumber: string;
+  description: string;
+  quantity: number;
+  unitPriceCents: number;
+  totalCents: number;
+};
+export type AdamHallCart = {
+  lines: AdamHallCartLine[];
+  totalCents: number;
+  currency: string;
+  customer: string;
+  shippingAddress: string;
+  shippingMethod: string;
+  paymentMethod: string;
+};
+export type AdamHallOrderResult = {
+  order: Order;
+  cart: AdamHallCart;
+};
 export type Activity = {
   id: number;
   entityType: string;

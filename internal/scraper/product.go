@@ -56,15 +56,16 @@ type ProductPreview struct {
 }
 
 type Fetcher struct {
-	client           *http.Client
-	resolver         *net.Resolver
-	adamHallClient   *http.Client
-	adamHallBaseURL  string
-	adamHallUsername string
-	adamHallPassword string
-	adamHallMu       sync.Mutex
-	adamHallPrices   map[string]adamHallPrice
-	adamHallExpires  time.Time
+	client             *http.Client
+	resolver           *net.Resolver
+	adamHallClient     *http.Client
+	adamHallBaseURL    string
+	adamHallUsername   string
+	adamHallPassword   string
+	adamHallMu         sync.Mutex
+	adamHallCheckoutMu sync.Mutex
+	adamHallPrices     map[string]adamHallPrice
+	adamHallExpires    time.Time
 }
 
 type adamHallPrice struct {

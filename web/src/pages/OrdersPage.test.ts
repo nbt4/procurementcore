@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Product } from "../lib/types";
+import { isAdamHallSupplier } from "../components/AdamHallOrderModal";
 import { receiptInventoryMessage } from "./OrdersPage";
 
 const product = (values: Partial<Product>): Product =>
@@ -43,5 +44,22 @@ describe("receiptInventoryMessage", () => {
         8,
       ),
     ).toContain("10 Devices");
+  });
+});
+
+describe("isAdamHallSupplier", () => {
+  const supplier = (values: Partial<import("../lib/types").Supplier>) => ({
+    id: 1, name: "", code: "", website: "", contactName: "", email: "", phone: "",
+    paymentTerms: "", defaultLeadDays: 0, rating: 0, preferred: false, active: true,
+    riskLevel: "low" as const, notes: "", ...values,
+  });
+
+  it("recognizes Adam Hall by name or official host", () => {
+    expect(isAdamHallSupplier(supplier({ name: "Adam Hall GmbH" }))).toBe(true);
+    expect(isAdamHallSupplier(supplier({ website: "https://www.adamhall.com/shop/de" }))).toBe(true);
+  });
+
+  it("rejects lookalike hosts", () => {
+    expect(isAdamHallSupplier(supplier({ website: "https://adamhall.com.example.org" }))).toBe(false);
   });
 });

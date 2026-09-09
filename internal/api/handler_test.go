@@ -47,6 +47,27 @@ func TestNormalizeSupplierOrderNumber(t *testing.T) {
 	}
 }
 
+func TestIsAdamHallSupplier(t *testing.T) {
+	tests := []struct {
+		name     string
+		supplier models.Supplier
+		want     bool
+	}{
+		{name: "name", supplier: models.Supplier{Name: "Adam Hall GmbH"}, want: true},
+		{name: "code", supplier: models.Supplier{Code: "ADAM-HALL"}, want: true},
+		{name: "website", supplier: models.Supplier{Website: "https://www.adamhall.com/shop/de/"}, want: true},
+		{name: "other supplier", supplier: models.Supplier{Name: "Thomann", Website: "https://thomann.de"}},
+		{name: "lookalike host", supplier: models.Supplier{Website: "https://adamhall.com.example.org"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := isAdamHallSupplier(test.supplier); got != test.want {
+				t.Fatalf("isAdamHallSupplier() = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
 func TestParseProductFilter(t *testing.T) {
 	values := url.Values{
 		"q": {"  cable  "}, "categoryId": {"12"}, "supplierId": {"7"}, "preferred": {"true"},

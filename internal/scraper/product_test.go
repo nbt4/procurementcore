@@ -417,6 +417,132 @@ func TestAdamHallPriceReportsRejectedLogin(t *testing.T) {
 	}
 }
 
+func TestAdamHallCartUsesFastOrderAndAccountDefaults(t *testing.T) {
+	var fastOrderCalls, orderCalls atomic.Int32
+	fetcher := newAdamHallCheckoutTestFetcher(t, &fastOrderCalls, &orderCalls)
+
+	cart, err := fetcher.AdamHallCart(t.Context(), []AdamHallItem{
+		{ProductNumber: " 8747x6 ", Quantity: 1},
+		{ProductNumber: "8747X6", Quantity: 2},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fastOrderCalls.Load() != 1 || orderCalls.Load() != 0 {
+		t.Fatalf("unexpected remote calls: fastOrder=%d order=%d", fastOrderCalls.Load(), orderCalls.Load())
+	}
+	if len(cart.Lines) != 1 || cart.Lines[0].ProductNumber != "8747X6" || cart.Lines[0].Quantity != 3 {
+		t.Fatalf("unexpected cart lines: %+v", cart.Lines)
+	}
+	if cart.TotalCents != 3705 || cart.Lines[0].UnitPriceCents != 1235 || cart.Currency != "EUR" {
+		t.Fatalf("unexpected cart price: %+v", cart)
+	}
+	if cart.Customer != "Ada Buyer" || !strings.Contains(cart.ShippingAddress, "Mainstraße 1") || cart.PaymentMethod != "Rechnung" || cart.ShippingMethod != "Standard" {
+		t.Fatalf("unexpected checkout context: %+v", cart)
+	}
+}
+
+func TestPlaceAdamHallOrderReturnsSupplierNumber(t *testing.T) {
+	var fastOrderCalls, orderCalls atomic.Int32
+	fetcher := newAdamHallCheckoutTestFetcher(t, &fastOrderCalls, &orderCalls)
+
+	order, err := fetcher.PlaceAdamHallOrder(t.Context(), []AdamHallItem{{ProductNumber: "8747X6", Quantity: 1}}, "PO-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if order.OrderNumber != "AH-4711" || fastOrderCalls.Load() != 1 || orderCalls.Load() != 1 {
+		t.Fatalf("unexpected order result: %+v, fastOrder=%d order=%d", order, fastOrderCalls.Load(), orderCalls.Load())
+	}
+}
+
+func newAdamHallCheckoutTestFetcher(t *testing.T, fastOrderCalls, orderCalls *atomic.Int32) *Fetcher {
+	t.Helper()
+	var server *httptest.Server
+	var expectedChallenge string
+	server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/context":
+			if r.Method == http.MethodPatch {
+				var input map[string]int
+				if err := json.NewDecoder(r.Body).Decode(&input); err != nil || input["selectedShippingMethodOptionNumber"] != 1 {
+					t.Fatalf("unexpected shipping selection: %#v (%v)", input, err)
+				}
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			if r.Header.Get("sw-context-token") == "authenticated-context" {
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"customer": map[string]any{
+						"firstName": "Ada", "lastName": "Buyer", "email": "buyer@example.com",
+						"activeShippingAddress": map[string]any{
+							"company": "Cores GmbH", "firstName": "Ada", "lastName": "Buyer",
+							"street": "Mainstraße 1", "zipcode": "12345", "city": "Berlin",
+							"country": map[string]string{"name": "Deutschland"},
+						},
+					},
+					"currency":       map[string]string{"isoCode": "EUR"},
+					"paymentMethod":  map[string]any{"name": "Invoice", "translated": map[string]string{"name": "Rechnung"}},
+					"shippingMethod": map[string]any{"name": "Default", "translated": map[string]string{"name": "Standard"}},
+				})
+				return
+			}
+			w.Header().Set("sw-context-token", "guest-context")
+			_ = json.NewEncoder(w).Encode(map[string]string{"token": "guest-context"})
+		case "/azure/urls":
+			loginURL := server.URL + "/oauth/authorize?redirect_uri=" + url.QueryEscape(server.URL+"/shop/en/customer/authorize")
+			_ = json.NewEncoder(w).Encode(map[string]string{"loginUrl": loginURL})
+		case "/oauth/authorize":
+			expectedChallenge = r.URL.Query().Get("code_challenge")
+			_, _ = w.Write([]byte(`<!doctype html><script>var SETTINGS = {"csrf":"csrf-value","transId":"transaction-value","hosts":{"tenant":"/tenant/policy","policy":"test-policy"}};</script>`))
+		case "/tenant/policy/SelfAsserted":
+			_ = json.NewEncoder(w).Encode(map[string]string{"status": "200"})
+		case "/tenant/policy/api/CombinedSigninAndSignup/confirmed":
+			http.Redirect(w, r, server.URL+"/shop/en/customer/authorize?code=authorization-code", http.StatusFound)
+		case "/customer/login":
+			var exchange map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&exchange); err != nil {
+				t.Fatal(err)
+			}
+			digest := sha256.Sum256([]byte(exchange["code_verifier"]))
+			if expectedChallenge == "" || base64.RawURLEncoding.EncodeToString(digest[:]) != expectedChallenge {
+				t.Fatal("invalid PKCE exchange")
+			}
+			w.Header().Set("sw-context-token", "authenticated-context")
+			_ = json.NewEncoder(w).Encode(map[string]string{"redirectUrl": "en"})
+		case "/checkout/fastOrder":
+			fastOrderCalls.Add(1)
+			var input struct {
+				Items []AdamHallItem `json:"items"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil || len(input.Items) != 1 || input.Items[0].ProductNumber != "8747X6" {
+				t.Fatalf("unexpected fast-order payload: %+v (%v)", input, err)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
+		case "/checkout/cart":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"lineItems": []any{map[string]any{
+					"label": "PDU 6", "quantity": 3,
+					"payload": map[string]string{"productNumber": "8747X6"},
+					"price":   map[string]float64{"unitPrice": 12.35, "totalPrice": 37.05},
+				}},
+				"price":      map[string]float64{"totalPrice": 37.05},
+				"extensions": map[string]any{"shippingOptionsExtension": map[string]any{"options": []any{map[string]any{"shippingOption": 1}}}},
+				"errors":     map[string]any{},
+			})
+		case "/checkout/order":
+			orderCalls.Add(1)
+			_ = json.NewEncoder(w).Encode(map[string]string{"orderNumber": "AH-4711"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	return &Fetcher{
+		adamHallClient: server.Client(), adamHallBaseURL: server.URL,
+		adamHallUsername: "buyer@example.com", adamHallPassword: "shop-secret",
+	}
+}
+
 func TestAdamHallLivePrice(t *testing.T) {
 	if os.Getenv("ADAMHALL_LIVE_TEST") != "1" {
 		t.Skip("set ADAMHALL_LIVE_TEST=1 to test the live account-price flow")
@@ -431,6 +557,23 @@ func TestAdamHallLivePrice(t *testing.T) {
 	}
 	if preview.SKU != "8747X6" || preview.PriceCents <= 0 || preview.Currency != "EUR" {
 		t.Fatalf("unexpected live Adam Hall preview: %+v", preview)
+	}
+}
+
+func TestAdamHallLiveCart(t *testing.T) {
+	if os.Getenv("ADAMHALL_LIVE_CART_TEST") != "1" {
+		t.Skip("set ADAMHALL_LIVE_CART_TEST=1 to test the live cart preview flow")
+	}
+	fetcher := New(Options{
+		AdamHallUsername: os.Getenv("ADAMHALL_USERNAME"),
+		AdamHallPassword: os.Getenv("ADAMHALL_PASSWORD"),
+	})
+	cart, err := fetcher.AdamHallCart(t.Context(), []AdamHallItem{{ProductNumber: "8747X6", Quantity: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cart.Lines) != 1 || !strings.EqualFold(cart.Lines[0].ProductNumber, "8747X6") || cart.TotalCents <= 0 {
+		t.Fatalf("unexpected live Adam Hall cart: %+v", cart)
 	}
 }
 

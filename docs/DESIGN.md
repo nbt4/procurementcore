@@ -30,6 +30,17 @@ vorausgefüllte Neuanlage an. Lade-, Fehler- und Leerezustand bleiben im Dialog
 sichtbar und die Verknüpfung kann nach einer externen Neuanlage erneut geprüft
 werden. Auf schmalen Viewports stehen Auswahl und Aktionen untereinander.
 
+## Adam-Hall-Warenkorb
+
+Nach der Umwandlung eines freigegebenen Bedarfs bei einem Adam-Hall-Lieferanten
+öffnet ProcurementCore den Live-Warenkorb automatisch. Bei bestehenden
+Bestellungsentwürfen ist dieselbe Aktion im Bestellungsdialog erreichbar. Der
+Dialog hält während der Serveranfrage seine Struktur, zeigt Fehler mit einer
+Wiederholungsaktion und nennt Geschäftskonto, Lieferadresse, Versand- und
+Zahlungsart sowie jede Position und den aktuellen Gesamtpreis. Die verbindliche
+Bestellaktion bleibt bis zur ausdrücklichen Kontrollbestätigung deaktiviert.
+Zugangsdaten und Shopware-Kontext werden nie an den Browser ausgegeben.
+
 ## Implementierung
 
 `web/src/cores-theme.css` und `web/src/lib/cores-design.ts` sind generierte Dateien. Änderungen erfolgen in den kanonischen Quellen des Umbrella-Repositories und werden dort synchronisiert und geprüft. Lokale Komponenten verwenden die `suite-*`-Primitives und dürfen sie nur fachlich ergänzen.

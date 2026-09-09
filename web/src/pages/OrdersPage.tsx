@@ -6,6 +6,7 @@ import {
   Plus,
   RefreshCw,
   Send,
+  ShoppingCart,
   Truck,
   X,
 } from "lucide-react";
@@ -20,6 +21,7 @@ import type {
 } from "../lib/types";
 import { Badge, Button, Empty, Field, Modal } from "../components/ui";
 import { useApp } from "../App";
+import AdamHallOrderModal, { isAdamHallSupplier } from "../components/AdamHallOrderModal";
 
 const statusLabel: Record<string, string> = {
   draft: "Entwurf",
@@ -28,6 +30,8 @@ const statusLabel: Record<string, string> = {
   partially_received: "Teileingang",
   received: "Empfangen",
   cancelled: "Storniert",
+  submitting: "Wird übertragen",
+  submission_unknown: "Übertragung prüfen",
 };
 const tone = (status: string) =>
   status === "received"
@@ -36,7 +40,7 @@ const tone = (status: string) =>
       ? "blue"
       : status === "sent"
         ? "amber"
-        : status === "cancelled"
+        : status === "cancelled" || status === "submission_unknown"
           ? "red"
           : "";
 
@@ -66,6 +70,7 @@ export default function OrdersPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [selected, setSelected] = useState<Order | null>(null);
   const [create, setCreate] = useState(false);
+  const [adamHallOrder, setAdamHallOrder] = useState<Order | null>(null);
   const [receipt, setReceipt] = useState<{
     order: Order;
     line: OrderLine;
@@ -170,9 +175,14 @@ export default function OrdersPage() {
               <Button variant="ghost" onClick={() => setSelected(null)}>
                 Schließen
               </Button>
+              {user.isAdmin && selected.status === "draft" && isAdamHallSupplier(selected.supplier) && (
+                <Button variant="primary" onClick={() => setAdamHallOrder(selected)}>
+                  <ShoppingCart size={16} /> Adam-Hall-Warenkorb
+                </Button>
+              )}
               {user.isAdmin && selected.status === "draft" && (
                 <Button
-                  variant="primary"
+                  variant={isAdamHallSupplier(selected.supplier) ? "ghost" : "primary"}
                   onClick={() => void update(selected, "sent")}
                 >
                   <Send size={16} /> Als gesendet markieren
@@ -186,8 +196,24 @@ export default function OrdersPage() {
                   <Truck size={16} /> Bestätigt
                 </Button>
               )}
+              {user.isAdmin && selected.status === "submission_unknown" && (
+                <>
+                  <a className="btn ghost" href="https://www.adamhall.com/shop/de/account/order" target="_blank" rel="noreferrer">
+                    <ExternalLink size={16} /> Adam Hall prüfen
+                  </a>
+                  <Button
+                    variant="danger"
+                    onClick={() => {
+                      if (window.confirm("Nur zurücksetzen, wenn im Adam-Hall-Konto keine Bestellung angelegt wurde."))
+                        void update(selected, "draft");
+                    }}
+                  >
+                    Als Entwurf zurücksetzen
+                  </Button>
+                </>
+              )}
               {user.isAdmin &&
-                !["received", "cancelled"].includes(selected.status) && (
+                !["received", "cancelled", "submission_unknown"].includes(selected.status) && (
                   <Button
                     variant="danger"
                     onClick={() => void update(selected, "cancelled")}
@@ -304,6 +330,18 @@ export default function OrdersPage() {
               : updated.lines.find((line) => line.receivedQuantity < line.quantity);
             setReceipt(nextLine ? { order: updated, line: nextLine } : null);
             notify("Wareneingang verbucht");
+            refresh();
+          }}
+        />
+      )}
+      {adamHallOrder && (
+        <AdamHallOrderModal
+          order={adamHallOrder}
+          onClose={() => setAdamHallOrder(null)}
+          onOrdered={(result) => {
+            setAdamHallOrder(null);
+            setSelected(result.order);
+            notify(`Bei Adam Hall bestellt: ${result.order.supplierOrderNumber}`);
             refresh();
           }}
         />

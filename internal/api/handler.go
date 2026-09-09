@@ -74,6 +74,8 @@ func (h *Handler) Routes() http.Handler {
 	r.Get("/orders/{id}", h.getOrder)
 	r.With(auth.RequireAdmin).Post("/orders", h.createOrder)
 	r.With(auth.RequireAdmin).Put("/orders/{id}", h.updateOrder)
+	r.With(auth.RequireAdmin).Post("/orders/{id}/adam-hall/cart", h.previewAdamHallOrder)
+	r.With(auth.RequireAdmin).Post("/orders/{id}/adam-hall/order", h.placeAdamHallOrder)
 	r.With(auth.RequireAdmin).Post("/orders/{id}/receipt", h.receiveOrder)
 	r.Get("/activity", h.listActivity)
 	r.Get("/export/spend.csv", h.exportSpend)
@@ -1103,7 +1105,7 @@ func (h *Handler) updateOrder(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &input) {
 		return
 	}
-	allowed := map[string]bool{"draft": true, "sent": true, "confirmed": true, "partially_received": true, "received": true, "cancelled": true}
+	allowed := map[string]bool{"draft": true, "sent": true, "confirmed": true, "partially_received": true, "received": true, "cancelled": true, "submission_unknown": true}
 	if !allowed[input.Status] {
 		badRequest(w, "Ungültiger Bestellstatus")
 		return
@@ -1119,6 +1121,156 @@ func (h *Handler) updateOrder(w http.ResponseWriter, r *http.Request) {
 	}
 	h.activity(r, "purchase_order", row.ID, "updated", fmt.Sprintf("status=%s supplier_order_number=%s", input.Status, row.SupplierOrderNumber))
 	writeJSON(w, http.StatusOK, row)
+}
+
+type adamHallOrderData struct {
+	Order                 models.PurchaseOrder
+	Items                 []scraper.AdamHallItem
+	ProductNumberByLineID map[uint]string
+}
+
+func (h *Handler) previewAdamHallOrder(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	data, message := h.adamHallOrderData(id)
+	if message != "" {
+		badRequest(w, message)
+		return
+	}
+	cart, err := h.scraper.AdamHallCart(r.Context(), data.Items)
+	if err != nil {
+		badRequest(w, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, cart)
+}
+
+func (h *Handler) placeAdamHallOrder(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	data, message := h.adamHallOrderData(id)
+	if message != "" {
+		badRequest(w, message)
+		return
+	}
+	claimed := h.db.Model(&models.PurchaseOrder{}).
+		Where("id = ? AND status = ? AND COALESCE(supplier_order_number, '') = ''", id, "draft").
+		Update("status", "submitting")
+	if claimed.Error != nil {
+		serverError(w, claimed.Error)
+		return
+	}
+	if claimed.RowsAffected != 1 {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "Bestellung wurde bereits übertragen oder wird gerade übertragen"})
+		return
+	}
+
+	comment := strings.TrimSpace(strings.Join([]string{data.Order.Number, data.Order.Notes}, " · "))
+	remoteOrder, err := h.scraper.PlaceAdamHallOrder(r.Context(), data.Items, comment)
+	if err != nil {
+		status := "draft"
+		if scraper.IsAdamHallSubmissionUncertain(err) {
+			status = "submission_unknown"
+		}
+		_ = h.db.Model(&models.PurchaseOrder{}).Where("id = ? AND status = ?", id, "submitting").Update("status", status).Error
+		h.activity(r, "purchase_order", id, "adam_hall_order_failed", data.Order.Number)
+		badRequest(w, err.Error())
+		return
+	}
+
+	unitPriceByProductNumber := make(map[string]int64, len(remoteOrder.Cart.Lines))
+	for _, line := range remoteOrder.Cart.Lines {
+		unitPriceByProductNumber[strings.ToUpper(strings.TrimSpace(line.ProductNumber))] = line.UnitPriceCents
+	}
+	now := time.Now()
+	updates := map[string]any{
+		"status": "sent", "supplier_order_number": remoteOrder.OrderNumber,
+		"order_date": now, "total_cents": remoteOrder.Cart.TotalCents, "currency": remoteOrder.Cart.Currency,
+	}
+	result := h.db.Model(&models.PurchaseOrder{}).Where("id = ? AND status = ?", id, "submitting").Updates(updates)
+	if result.Error != nil || result.RowsAffected != 1 {
+		// Once Adam Hall accepted an order, preserve its external reference even
+		// if a concurrent local state change happened.
+		fallback := h.db.Model(&models.PurchaseOrder{}).Where("id = ?", id).Updates(updates)
+		if fallback.Error != nil || fallback.RowsAffected != 1 {
+			serverError(w, errors.New("Adam-Hall-Bestellnummer konnte lokal nicht gesichert werden"))
+			return
+		}
+	}
+	for lineID, productNumber := range data.ProductNumberByLineID {
+		if price, exists := unitPriceByProductNumber[productNumber]; exists {
+			if err := h.db.Model(&models.PurchaseOrderLine{}).Where("id = ? AND purchase_order_id = ?", lineID, id).Update("unit_price_cents", price).Error; err != nil {
+				h.activity(r, "purchase_order", id, "adam_hall_price_sync_failed", remoteOrder.OrderNumber)
+			}
+		}
+	}
+	h.activity(r, "purchase_order", id, "ordered_at_adam_hall", remoteOrder.OrderNumber)
+
+	var updated models.PurchaseOrder
+	if err := h.db.Preload("Supplier").Preload("Lines").Preload("Lines.Product").First(&updated, id).Error; err != nil {
+		serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"order": updated, "cart": remoteOrder.Cart})
+}
+
+func (h *Handler) adamHallOrderData(id uint) (adamHallOrderData, string) {
+	var order models.PurchaseOrder
+	if err := h.db.Preload("Supplier").Preload("Lines").Preload("Lines.Product").First(&order, id).Error; err != nil {
+		return adamHallOrderData{}, "Bestellung wurde nicht gefunden"
+	}
+	if order.Status != "draft" {
+		return adamHallOrderData{}, "Nur Bestellungen im Entwurf können an Adam Hall übertragen werden"
+	}
+	if strings.TrimSpace(order.SupplierOrderNumber) != "" {
+		return adamHallOrderData{}, "Bestellung besitzt bereits eine Lieferanten-Bestellnummer"
+	}
+	if order.Supplier == nil || !isAdamHallSupplier(*order.Supplier) {
+		return adamHallOrderData{}, "Der gewählte Lieferant ist kein Adam-Hall-Konto"
+	}
+	items := make([]scraper.AdamHallItem, 0, len(order.Lines))
+	productNumberByLineID := make(map[uint]string, len(order.Lines))
+	for _, line := range order.Lines {
+		if line.ProductID == nil || line.Product == nil {
+			return adamHallOrderData{}, fmt.Sprintf("Position %q ist keinem Katalogartikel zugeordnet", line.Description)
+		}
+		productNumber := strings.TrimSpace(line.Product.SKU)
+		var offer models.Offer
+		if err := h.db.Where("product_id = ? AND supplier_id = ? AND active = ?", *line.ProductID, order.SupplierID, true).
+			Order("price_cents").First(&offer).Error; err == nil && strings.TrimSpace(offer.SupplierSKU) != "" {
+			productNumber = strings.TrimSpace(offer.SupplierSKU)
+		}
+		if productNumber == "" {
+			return adamHallOrderData{}, fmt.Sprintf("Position %q besitzt keine Adam-Hall-Artikelnummer", line.Description)
+		}
+		if line.Quantity <= 0 || math.Trunc(line.Quantity) != line.Quantity {
+			return adamHallOrderData{}, fmt.Sprintf("Position %q benötigt für Adam Hall eine ganzzahlige Menge", line.Description)
+		}
+		normalized := strings.ToUpper(productNumber)
+		items = append(items, scraper.AdamHallItem{ProductNumber: normalized, Quantity: int(line.Quantity)})
+		productNumberByLineID[line.ID] = normalized
+	}
+	if len(items) == 0 {
+		return adamHallOrderData{}, "Bestellung enthält keine Positionen"
+	}
+	return adamHallOrderData{Order: order, Items: items, ProductNumberByLineID: productNumberByLineID}, ""
+}
+
+func isAdamHallSupplier(supplier models.Supplier) bool {
+	compact := strings.NewReplacer(" ", "", "-", "", "_", "").Replace(strings.ToLower(supplier.Name + supplier.Code))
+	if strings.Contains(compact, "adamhall") {
+		return true
+	}
+	website, err := url.Parse(strings.TrimSpace(supplier.Website))
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(website.Hostname())
+	return host == "adamhall.com" || strings.HasSuffix(host, ".adamhall.com")
 }
 
 type receiptFlowError struct {
