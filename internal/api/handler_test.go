@@ -41,6 +41,12 @@ func TestValidateWarehouseReceipt(t *testing.T) {
 	}
 }
 
+func TestNormalizeSupplierOrderNumber(t *testing.T) {
+	if got := normalizeSupplierOrderNumber("  AB-4711 / 26  "); got != "AB-4711 / 26" {
+		t.Fatalf("normalizeSupplierOrderNumber() = %q", got)
+	}
+}
+
 func TestParseProductFilter(t *testing.T) {
 	values := url.Values{
 		"q": {"  cable  "}, "categoryId": {"12"}, "supplierId": {"7"}, "preferred": {"true"},

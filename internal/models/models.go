@@ -151,22 +151,23 @@ type RequisitionLine struct {
 }
 
 type PurchaseOrder struct {
-	ID               uint                `gorm:"primaryKey" json:"id"`
-	Number           string              `gorm:"size:40;uniqueIndex;not null" json:"number"`
-	SupplierID       uint                `gorm:"not null;index" json:"supplierId"`
-	Supplier         *Supplier           `json:"supplier,omitempty"`
-	RequisitionID    *uint               `gorm:"index" json:"requisitionId"`
-	Status           string              `gorm:"size:30;default:'draft';index" json:"status"`
-	Currency         string              `gorm:"size:3;default:'EUR'" json:"currency"`
-	TotalCents       int64               `json:"totalCents"`
-	OrderedBy        uint                `json:"orderedBy"`
-	OrderedByName    string              `gorm:"size:160" json:"orderedByName"`
-	OrderDate        *time.Time          `json:"orderDate"`
-	ExpectedDelivery *time.Time          `json:"expectedDelivery"`
-	Notes            string              `gorm:"type:text" json:"notes"`
-	CreatedAt        time.Time           `json:"createdAt"`
-	UpdatedAt        time.Time           `json:"updatedAt"`
-	Lines            []PurchaseOrderLine `json:"lines"`
+	ID                  uint                `gorm:"primaryKey" json:"id"`
+	Number              string              `gorm:"size:40;uniqueIndex;not null" json:"number"`
+	SupplierOrderNumber string              `gorm:"size:120;index" json:"supplierOrderNumber"`
+	SupplierID          uint                `gorm:"not null;index" json:"supplierId"`
+	Supplier            *Supplier           `json:"supplier,omitempty"`
+	RequisitionID       *uint               `gorm:"index" json:"requisitionId"`
+	Status              string              `gorm:"size:30;default:'draft';index" json:"status"`
+	Currency            string              `gorm:"size:3;default:'EUR'" json:"currency"`
+	TotalCents          int64               `json:"totalCents"`
+	OrderedBy           uint                `json:"orderedBy"`
+	OrderedByName       string              `gorm:"size:160" json:"orderedByName"`
+	OrderDate           *time.Time          `json:"orderDate"`
+	ExpectedDelivery    *time.Time          `json:"expectedDelivery"`
+	Notes               string              `gorm:"type:text" json:"notes"`
+	CreatedAt           time.Time           `json:"createdAt"`
+	UpdatedAt           time.Time           `json:"updatedAt"`
+	Lines               []PurchaseOrderLine `json:"lines"`
 }
 
 type PurchaseOrderLine struct {

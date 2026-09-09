@@ -15,7 +15,6 @@ import {
   ClipboardCheck,
   FileDown,
   Gauge,
-  Home,
   Link2,
   LogOut,
   Menu,
@@ -31,6 +30,7 @@ import RequisitionsPage from "./pages/RequisitionsPage";
 import OrdersPage from "./pages/OrdersPage";
 import ProductLinksPage from "./pages/ProductLinksPage";
 import { appAssetPath, centralLoginURL, dashboardURL } from "./lib/app-paths";
+import { SuiteCoreNavigation } from "./components/SuiteCoreNavigation";
 
 type AppContextValue = {
   user: User;
@@ -128,8 +128,6 @@ function Shell({
               <span>{label}</span>
             </NavLink>
           ))}
-        </nav>
-        <div className="sidebar-footer">
           <a
             className="btn ghost sidebar-action"
             href={`${apiBase}/export/spend.csv`}
@@ -138,14 +136,9 @@ function Shell({
             <FileDown size={16} />
             <span>Spend exportieren</span>
           </a>
-          <a
-            className="btn ghost sidebar-action"
-            href={dashboardURL}
-            title={!sidebarExpanded ? "Cores Dashboard" : undefined}
-          >
-            <Home size={16} />
-            <span>Cores Dashboard</span>
-          </a>
+          <SuiteCoreNavigation current="procurement" dashboardURL={dashboardURL} compact={!sidebarExpanded} />
+        </nav>
+        <div className="sidebar-footer">
           <div className="user">
             <div className="avatar">
               {(user.displayName || user.username).slice(0, 1).toUpperCase()}

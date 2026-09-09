@@ -1,5 +1,14 @@
 # ProcurementCore
 
+## Fortlaufender Wareneingang und Bestellreferenz (1.0.30)
+
+Nach einem gebuchten Positionseingang bleibt der Wareneingangsdialog geöffnet
+und wechselt bei einer vollständig gebuchten Zeile zur nächsten offenen Position.
+Damit lassen sich mehrere Positionen ohne erneutes Öffnen bearbeiten. Zusätzlich
+lässt sich die Bestellnummer des Lieferanten bei der Anlage und jederzeit später
+im Bestelldialog pflegen; die interne `PO-…`-Nummer bleibt als stabile Cores-ID
+erhalten.
+
 ## Wareneingang und Warehouse-Bestand (1.0.29)
 
 Wareneingänge für verknüpfte Katalogartikel aktualisieren WarehouseCore in

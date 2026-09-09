@@ -1051,7 +1051,12 @@ func validateOrder(row *models.PurchaseOrder) string {
 	if row.Currency == "" {
 		row.Currency = "EUR"
 	}
+	row.SupplierOrderNumber = normalizeSupplierOrderNumber(row.SupplierOrderNumber)
 	return ""
+}
+
+func normalizeSupplierOrderNumber(value string) string {
+	return strings.TrimSpace(value)
 }
 
 func (h *Handler) createOrder(w http.ResponseWriter, r *http.Request) {
@@ -1090,9 +1095,10 @@ func (h *Handler) updateOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input struct {
-		Status           string     `json:"status"`
-		ExpectedDelivery *time.Time `json:"expectedDelivery"`
-		Notes            string     `json:"notes"`
+		Status              string     `json:"status"`
+		SupplierOrderNumber string     `json:"supplierOrderNumber"`
+		ExpectedDelivery    *time.Time `json:"expectedDelivery"`
+		Notes               string     `json:"notes"`
 	}
 	if !decode(w, r, &input) {
 		return
@@ -1102,7 +1108,7 @@ func (h *Handler) updateOrder(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, "Ungültiger Bestellstatus")
 		return
 	}
-	row.Status, row.ExpectedDelivery, row.Notes = input.Status, input.ExpectedDelivery, input.Notes
+	row.Status, row.SupplierOrderNumber, row.ExpectedDelivery, row.Notes = input.Status, normalizeSupplierOrderNumber(input.SupplierOrderNumber), input.ExpectedDelivery, input.Notes
 	if input.Status == "sent" && row.OrderDate == nil {
 		now := time.Now()
 		row.OrderDate = &now
@@ -1111,7 +1117,7 @@ func (h *Handler) updateOrder(w http.ResponseWriter, r *http.Request) {
 		serverError(w, err)
 		return
 	}
-	h.activity(r, "purchase_order", row.ID, "status_changed", input.Status)
+	h.activity(r, "purchase_order", row.ID, "updated", fmt.Sprintf("status=%s supplier_order_number=%s", input.Status, row.SupplierOrderNumber))
 	writeJSON(w, http.StatusOK, row)
 }
 

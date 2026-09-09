@@ -186,6 +186,7 @@ export type OrderLine = {
 export type Order = {
   id: number;
   number: string;
+  supplierOrderNumber: string;
   supplierId: number;
   supplier?: Supplier;
   requisitionId?: number;

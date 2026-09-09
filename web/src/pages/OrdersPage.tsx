@@ -88,6 +88,7 @@ export default function OrdersPage() {
       method: "PUT",
       body: JSON.stringify({
         status,
+        supplierOrderNumber: row.supplierOrderNumber || "",
         expectedDelivery: row.expectedDelivery || null,
         notes: row.notes || "",
       }),
@@ -134,6 +135,7 @@ export default function OrdersPage() {
                 <tr key={row.id}>
                   <td>
                     <span className="cell-title">{row.number}</span>
+                    {row.supplierOrderNumber && <div className="cell-sub">Lieferant: {row.supplierOrderNumber}</div>}
                     <div className="cell-sub">{date(row.createdAt)}</div>
                   </td>
                   <td>{row.supplier?.name}</td>
@@ -204,6 +206,17 @@ export default function OrdersPage() {
             </Field>
             <Field label="Erwartete Lieferung">
               <span>{date(selected.expectedDelivery)}</span>
+            </Field>
+            <Field label="Lieferanten-Bestellnummer" full>
+              <SupplierOrderNumberEditor
+                order={selected}
+                disabled={!user.isAdmin}
+                onSaved={async () => {
+                  await open(selected.id);
+                  refresh();
+                  notify("Bestellnummer gespeichert");
+                }}
+              />
             </Field>
             <Field label="Notizen" full>
               <p>{selected.notes || "–"}</p>
@@ -279,11 +292,17 @@ export default function OrdersPage() {
       )}
       {receipt && (
         <ReceiptModal
+          key={`${receipt.order.id}-${receipt.line.id}-${receipt.line.receivedQuantity}`}
           value={receipt}
           onClose={() => setReceipt(null)}
-          onSaved={() => {
-            setReceipt(null);
-            setSelected(null);
+          onSaved={async () => {
+            const updated = await api<Order>(`/orders/${receipt.order.id}`);
+            setSelected(updated);
+            const currentLine = updated.lines.find((line) => line.id === receipt.line.id);
+            const nextLine = currentLine && currentLine.receivedQuantity < currentLine.quantity
+              ? currentLine
+              : updated.lines.find((line) => line.receivedQuantity < line.quantity);
+            setReceipt(nextLine ? { order: updated, line: nextLine } : null);
             notify("Wareneingang verbucht");
             refresh();
           }}
@@ -306,6 +325,7 @@ function OrderModal({
 }) {
   const [supplierId, setSupplierId] = useState(0);
   const [expected, setExpected] = useState("");
+  const [supplierOrderNumber, setSupplierOrderNumber] = useState("");
   const [notes, setNotes] = useState("");
   const [lines, setLines] = useState<OrderLine[]>([
     {
@@ -348,6 +368,7 @@ function OrderModal({
           supplierId,
           status: "draft",
           currency: "EUR",
+          supplierOrderNumber,
           expectedDelivery: expected
             ? new Date(`${expected}T12:00:00`).toISOString()
             : null,
@@ -355,7 +376,7 @@ function OrderModal({
           lines,
         }),
       });
-      onSaved();
+      await onSaved();
     } catch (caught) {
       setError((caught as Error).message);
     }
@@ -400,6 +421,13 @@ function OrderModal({
               type="date"
               value={expected}
               onChange={(event) => setExpected(event.target.value)}
+            />
+          </Field>
+          <Field label="Lieferanten-Bestellnummer">
+            <input
+              value={supplierOrderNumber}
+              onChange={(event) => setSupplierOrderNumber(event.target.value)}
+              placeholder="z. B. AB-4711"
             />
           </Field>
           <Field label="Notizen" full>
@@ -531,6 +559,39 @@ function OrderModal({
       </form>
     </Modal>
   );
+}
+
+function SupplierOrderNumberEditor({ order, disabled, onSaved }: { order: Order; disabled: boolean; onSaved: () => Promise<void> }) {
+  const [value, setValue] = useState(order.supplierOrderNumber || "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const save = async () => {
+    setSaving(true);
+    setError("");
+    try {
+      await api(`/orders/${order.id}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          status: order.status,
+          supplierOrderNumber: value,
+          expectedDelivery: order.expectedDelivery || null,
+          notes: order.notes || "",
+        }),
+      });
+      await onSaved();
+    } catch (caught) {
+      setError((caught as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+  return <div>
+    <div className="receipt-link-row">
+      <input value={value} disabled={disabled || saving} onChange={(event) => setValue(event.target.value)} placeholder="Bestellnummer des Lieferanten" />
+      {!disabled && <Button type="button" variant="ghost" disabled={saving} onClick={() => void save()}>{saving ? "Speichert …" : "Speichern"}</Button>}
+    </div>
+    {error && <div className="notice">{error}</div>}
+  </div>;
 }
 
 function ReceiptModal({
