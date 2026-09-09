@@ -9,6 +9,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"slices"
 	"strings"
 )
 
@@ -56,9 +57,11 @@ func IsAdamHallSubmissionUncertain(err error) bool {
 
 type adamHallCartPayload struct {
 	LineItems []struct {
-		Label    string `json:"label"`
-		Quantity int    `json:"quantity"`
-		Payload  struct {
+		ID        string `json:"id"`
+		Label     string `json:"label"`
+		Quantity  int    `json:"quantity"`
+		Removable bool   `json:"removable"`
+		Payload   struct {
 			ProductNumber string `json:"productNumber"`
 		} `json:"payload"`
 		Price struct {
@@ -170,6 +173,9 @@ func (f *Fetcher) prepareAdamHallCart(ctx context.Context, items []AdamHallItem)
 	if err != nil {
 		return AdamHallCart{}, "", err
 	}
+	if err := f.clearAdamHallCart(ctx, token); err != nil {
+		return AdamHallCart{}, "", err
+	}
 	var fastOrder struct {
 		Success bool `json:"success"`
 	}
@@ -201,10 +207,56 @@ func (f *Fetcher) prepareAdamHallCart(ctx context.Context, items []AdamHallItem)
 		return AdamHallCart{}, "", err
 	}
 	cart := adamHallCartFromPayload(payload, contextPayload)
-	if len(cart.Lines) != len(items) {
-		return AdamHallCart{}, "", errors.New("Adam Hall hat nicht alle Positionen in den Warenkorb übernommen")
+	if err := validateAdamHallCart(items, cart.Lines); err != nil {
+		return AdamHallCart{}, "", err
 	}
 	return cart, token, nil
+}
+
+func (f *Fetcher) clearAdamHallCart(ctx context.Context, token string) error {
+	var payload adamHallCartPayload
+	if err := f.adamHallJSON(ctx, http.MethodGet, "/checkout/cart", token, nil, &payload); err != nil {
+		return err
+	}
+	ids := make([]string, 0, len(payload.LineItems))
+	for _, line := range payload.LineItems {
+		if line.Removable && strings.TrimSpace(line.ID) != "" {
+			ids = append(ids, line.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	if err := f.adamHallJSON(ctx, http.MethodDelete, "/checkout/cart/line-item", token, map[string]any{"ids": ids}, nil); err != nil {
+		return fmt.Errorf("Adam-Hall-Warenkorb konnte nicht geleert werden: %w", err)
+	}
+	return nil
+}
+
+func validateAdamHallCart(items []AdamHallItem, lines []AdamHallCartLine) error {
+	quantities := make(map[string]int, len(lines))
+	for _, line := range lines {
+		productNumber := strings.ToUpper(strings.TrimSpace(line.ProductNumber))
+		if productNumber != "" {
+			quantities[productNumber] += line.Quantity
+		}
+	}
+	for _, item := range items {
+		actual := quantities[item.ProductNumber]
+		if actual != item.Quantity {
+			return fmt.Errorf("Adam Hall hat Artikel %s nicht mit der erwarteten Menge übernommen (erwartet: %d, Warenkorb: %d)", item.ProductNumber, item.Quantity, actual)
+		}
+		delete(quantities, item.ProductNumber)
+	}
+	if len(quantities) > 0 {
+		unexpected := make([]string, 0, len(quantities))
+		for productNumber := range quantities {
+			unexpected = append(unexpected, productNumber)
+		}
+		slices.Sort(unexpected)
+		return fmt.Errorf("Adam-Hall-Warenkorb enthält unerwartete Artikel: %s", strings.Join(unexpected, ", "))
+	}
+	return nil
 }
 
 func normalizeAdamHallItems(items []AdamHallItem) ([]AdamHallItem, error) {

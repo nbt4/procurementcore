@@ -3,6 +3,7 @@ package scraper
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -418,8 +419,8 @@ func TestAdamHallPriceReportsRejectedLogin(t *testing.T) {
 }
 
 func TestAdamHallCartUsesFastOrderAndAccountDefaults(t *testing.T) {
-	var fastOrderCalls, orderCalls atomic.Int32
-	fetcher := newAdamHallCheckoutTestFetcher(t, &fastOrderCalls, &orderCalls)
+	var clearCalls, fastOrderCalls, orderCalls atomic.Int32
+	fetcher := newAdamHallCheckoutTestFetcher(t, &clearCalls, &fastOrderCalls, &orderCalls)
 
 	cart, err := fetcher.AdamHallCart(t.Context(), []AdamHallItem{
 		{ProductNumber: " 8747x6 ", Quantity: 1},
@@ -428,8 +429,8 @@ func TestAdamHallCartUsesFastOrderAndAccountDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fastOrderCalls.Load() != 1 || orderCalls.Load() != 0 {
-		t.Fatalf("unexpected remote calls: fastOrder=%d order=%d", fastOrderCalls.Load(), orderCalls.Load())
+	if clearCalls.Load() != 1 || fastOrderCalls.Load() != 1 || orderCalls.Load() != 0 {
+		t.Fatalf("unexpected remote calls: clear=%d fastOrder=%d order=%d", clearCalls.Load(), fastOrderCalls.Load(), orderCalls.Load())
 	}
 	if len(cart.Lines) != 1 || cart.Lines[0].ProductNumber != "8747X6" || cart.Lines[0].Quantity != 3 {
 		t.Fatalf("unexpected cart lines: %+v", cart.Lines)
@@ -443,8 +444,8 @@ func TestAdamHallCartUsesFastOrderAndAccountDefaults(t *testing.T) {
 }
 
 func TestPlaceAdamHallOrderReturnsSupplierNumber(t *testing.T) {
-	var fastOrderCalls, orderCalls atomic.Int32
-	fetcher := newAdamHallCheckoutTestFetcher(t, &fastOrderCalls, &orderCalls)
+	var clearCalls, fastOrderCalls, orderCalls atomic.Int32
+	fetcher := newAdamHallCheckoutTestFetcher(t, &clearCalls, &fastOrderCalls, &orderCalls)
 
 	order, err := fetcher.PlaceAdamHallOrder(t.Context(), []AdamHallItem{{ProductNumber: "8747X6", Quantity: 1}}, "PO-1")
 	if err != nil {
@@ -455,10 +456,34 @@ func TestPlaceAdamHallOrderReturnsSupplierNumber(t *testing.T) {
 	}
 }
 
-func newAdamHallCheckoutTestFetcher(t *testing.T, fastOrderCalls, orderCalls *atomic.Int32) *Fetcher {
+func TestValidateAdamHallCartRequiresExactProductsAndQuantities(t *testing.T) {
+	tests := []struct {
+		name  string
+		lines []AdamHallCartLine
+		want  string
+	}{
+		{name: "exact", lines: []AdamHallCartLine{{ProductNumber: "8747x3", Quantity: 5}}},
+		{name: "wrong quantity", lines: []AdamHallCartLine{{ProductNumber: "8747X3", Quantity: 4}}, want: "erwartet: 5, Warenkorb: 4"},
+		{name: "unexpected product", lines: []AdamHallCartLine{{ProductNumber: "8747X3", Quantity: 5}, {ProductNumber: "8747X6", Quantity: 1}}, want: "unerwartete Artikel: 8747X6"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateAdamHallCart([]AdamHallItem{{ProductNumber: "8747X3", Quantity: 5}}, test.lines)
+			if test.want == "" && err != nil {
+				t.Fatal(err)
+			}
+			if test.want != "" && (err == nil || !strings.Contains(err.Error(), test.want)) {
+				t.Fatalf("expected %q, got %v", test.want, err)
+			}
+		})
+	}
+}
+
+func newAdamHallCheckoutTestFetcher(t *testing.T, clearCalls, fastOrderCalls, orderCalls *atomic.Int32) *Fetcher {
 	t.Helper()
 	var server *httptest.Server
 	var expectedChallenge string
+	cartQuantity := 0
 	server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/context":
@@ -517,15 +542,29 @@ func newAdamHallCheckoutTestFetcher(t *testing.T, fastOrderCalls, orderCalls *at
 			if err := json.NewDecoder(r.Body).Decode(&input); err != nil || len(input.Items) != 1 || input.Items[0].ProductNumber != "8747X6" {
 				t.Fatalf("unexpected fast-order payload: %+v (%v)", input, err)
 			}
+			cartQuantity = input.Items[0].Quantity
 			_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
+		case "/checkout/cart/line-item":
+			clearCalls.Add(1)
+			var input struct {
+				IDs []string `json:"ids"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil || len(input.IDs) != 1 || input.IDs[0] != "existing-line" {
+				t.Fatalf("unexpected cart clear payload: %+v (%v)", input, err)
+			}
+			w.WriteHeader(http.StatusNoContent)
 		case "/checkout/cart":
+			productNumber, label, quantity := "8747X3", "PDU 3", 4
+			if cartQuantity > 0 {
+				productNumber, label, quantity = "8747X6", "PDU 6", cartQuantity
+			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"lineItems": []any{map[string]any{
-					"label": "PDU 6", "quantity": 3,
-					"payload": map[string]string{"productNumber": "8747X6"},
-					"price":   map[string]float64{"unitPrice": 12.35, "totalPrice": 37.05},
+					"id": "existing-line", "removable": true, "label": label, "quantity": quantity,
+					"payload": map[string]string{"productNumber": productNumber},
+					"price":   map[string]float64{"unitPrice": 12.35, "totalPrice": 12.35 * float64(quantity)},
 				}},
-				"price":      map[string]float64{"totalPrice": 37.05},
+				"price":      map[string]float64{"totalPrice": 12.35 * float64(quantity)},
 				"extensions": map[string]any{"shippingOptionsExtension": map[string]any{"options": []any{map[string]any{"shippingOption": 1}}}},
 				"errors":     map[string]any{},
 			})
@@ -568,11 +607,22 @@ func TestAdamHallLiveCart(t *testing.T) {
 		AdamHallUsername: os.Getenv("ADAMHALL_USERNAME"),
 		AdamHallPassword: os.Getenv("ADAMHALL_PASSWORD"),
 	})
-	cart, err := fetcher.AdamHallCart(t.Context(), []AdamHallItem{{ProductNumber: "8747X6", Quantity: 1}})
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		token, err := fetcher.loginAdamHall(ctx)
+		if err == nil {
+			err = fetcher.clearAdamHallCart(ctx, token)
+		}
+		if err != nil {
+			t.Errorf("live cart cleanup failed: %v", err)
+		}
+	}()
+	cart, err := fetcher.AdamHallCart(t.Context(), []AdamHallItem{{ProductNumber: "8747X3", Quantity: 5}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cart.Lines) != 1 || !strings.EqualFold(cart.Lines[0].ProductNumber, "8747X6") || cart.TotalCents <= 0 {
+	if len(cart.Lines) != 1 || !strings.EqualFold(cart.Lines[0].ProductNumber, "8747X3") || cart.Lines[0].Quantity != 5 || cart.TotalCents <= 0 {
 		t.Fatalf("unexpected live Adam Hall cart: %+v", cart)
 	}
 }

@@ -31,3 +31,19 @@ func TestLogoutHandlerExpiresSharedCookie(t *testing.T) {
 		t.Fatalf("body = %q", recorder.Body.String())
 	}
 }
+
+func TestSecurityHeadersAllowDesignSystemFonts(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+
+	securityHeaders(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})).ServeHTTP(recorder, request)
+
+	policy := recorder.Header().Get("Content-Security-Policy")
+	for _, expected := range []string{"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com", "font-src 'self' https://fonts.gstatic.com"} {
+		if !strings.Contains(policy, expected) {
+			t.Errorf("Content-Security-Policy %q does not contain %q", policy, expected)
+		}
+	}
+}

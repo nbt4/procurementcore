@@ -1,5 +1,13 @@
 # ProcurementCore
 
+## Zuverlässiger Adam-Hall-Warenkorb (1.0.32)
+
+Jede Vorschau ersetzt jetzt den bestehenden Adam-Hall-Warenkorb, statt neue
+Mengen auf möglicherweise vorhandene Konto-Positionen zu addieren. Anschließend
+prüft ProcurementCore jede Artikelnummer und Menge exakt, bevor eine Bestellung
+freigegeben werden kann. Die Content Security Policy erlaubt außerdem die vom
+gemeinsamen Designsystem geladenen Inter- und JetBrains-Mono-Schriften.
+
 ## Adam-Hall-Warenkorb und Direktbestellung (1.0.31)
 
 Freigegebene Bedarfe öffnen nach der Umwandlung mit einem Adam-Hall-Lieferanten
