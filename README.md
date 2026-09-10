@@ -1,5 +1,17 @@
 # ProcurementCore
 
+## Bestellungen aus PDF nacherfassen (1.0.34)
+
+Administratoren können bereits getätigte Bestellungen über eine PDF mit
+Textebene nacherfassen. ProcurementCore erkennt vorhandene Lieferanten und
+Katalogartikel sowie Bestellnummer, Bestell- und Lieferdatum, Währung, Mengen
+und Preise. Vor der Anlage zeigt ein vollständig editierbarer Prüfschritt den
+Erkennungsgrad, Dokument- und Positionssumme sowie konkrete Unsicherheiten.
+Importierte Bestellungen werden als „Gesendet“ oder „Bestätigt“ angelegt; die
+hochgeladene PDF wird ausschließlich zur Analyse verarbeitet und nicht
+gespeichert. Uploads sind auf 12 MB, 100 Seiten und maschinenlesbare PDFs
+begrenzt.
+
 ## Adam-Hall-Warenkorb im Shop öffnen (1.0.33)
 
 Nach dem erfolgreichen Aufbau eines Adam-Hall-Warenkorbs kann dieser direkt im
@@ -69,6 +81,7 @@ ProcurementCore ist der Einkaufs-Service des Cores-Ökosystems. Er verbindet Bed
 - Mehrere Angebote pro Artikel mit Einkaufslink, Mindestmenge, Packgröße und Preisverlauf
 - Tiefpreis-Alarme, die bei neuen oder geänderten Angeboten automatisch auslösen
 - Bedarfsmeldungen mit Entwurf, Einreichung, Freigabe, Ablehnung, Bestellkonvertierung und direkten Links von Katalogpositionen zum Artikel sowie zur hinterlegten Produktseite
+- Nachträgliche Bestellerfassung aus maschinenlesbaren PDFs mit automatischer Lieferanten-, Metadaten-, Positions- und Katalogerkennung sowie editierbarer Prüfung vor dem Speichern
 - Server-seitig erzeugte Adam-Hall-Warenkörbe für freigegebene Bedarfe und Bestellungsentwürfe: Konto, Lieferadresse, Zahlungsart, Positionen und Live-Gesamtpreis werden vor der verbindlichen Übertragung geprüft; der Warenkorb lässt sich zusätzlich im offiziellen Shop öffnen, und die Adam-Hall-Bestellnummer sowie finalen Preise fließen zurück in ProcurementCore
 - Produktabgleich mit WarehouseCore: bestehende Artikel werden anhand EAN/GTIN, Herstellerartikelnummer, Modell, Hersteller und Name vorgeschlagen und anschließend eindeutig verknüpft
 - Direkte Übernahme eines Procurement-Artikels in den vollständigen Warehouse-Produktdialog; erkannte Stammdaten und technische Attribute sind vorausgefüllt, bleiben aber bearbeitbar

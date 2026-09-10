@@ -1,14 +1,42 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
+	"mime/multipart"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"reflect"
+	"strings"
 	"testing"
 
 	"procurementcore/internal/models"
 )
+
+func TestPreviewOrderImportRejectsInvalidPDF(t *testing.T) {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	file, err := writer.CreateFormFile("file", "order.pdf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.Write([]byte("not a PDF")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/orders/import-preview", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	response := httptest.NewRecorder()
+
+	(&Handler{}).previewOrderImport(response, req)
+
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "kein gültiges PDF") {
+		t.Fatalf("unexpected response: status=%d body=%s", response.Code, response.Body.String())
+	}
+}
 
 func TestValidateWarehouseReceipt(t *testing.T) {
 	tests := []struct {
@@ -44,6 +72,36 @@ func TestValidateWarehouseReceipt(t *testing.T) {
 func TestNormalizeSupplierOrderNumber(t *testing.T) {
 	if got := normalizeSupplierOrderNumber("  AB-4711 / 26  "); got != "AB-4711 / 26" {
 		t.Fatalf("normalizeSupplierOrderNumber() = %q", got)
+	}
+}
+
+func TestValidateOrderRestrictsInitialStatus(t *testing.T) {
+	order := models.PurchaseOrder{
+		SupplierID: 1,
+		Status:     "received",
+		Lines:      []models.PurchaseOrderLine{{Description: "Artikel", Quantity: 1, UnitPriceCents: 100}},
+	}
+	if got := validateOrder(&order); got != "Ungültiger initialer Bestellstatus" {
+		t.Fatalf("validateOrder() = %q", got)
+	}
+	order.Status = "confirmed"
+	if got := validateOrder(&order); got != "" {
+		t.Fatalf("confirmed import should be accepted: %s", got)
+	}
+}
+
+func TestValidateOrderNormalizesAndRestrictsCurrency(t *testing.T) {
+	order := models.PurchaseOrder{
+		SupplierID: 1,
+		Currency:   " eur ",
+		Lines:      []models.PurchaseOrderLine{{Description: "Artikel", Quantity: 1, UnitPriceCents: 100}},
+	}
+	if got := validateOrder(&order); got != "" || order.Currency != "EUR" {
+		t.Fatalf("currency normalization failed: message=%q order=%+v", got, order)
+	}
+	order.Currency = "EURO"
+	if got := validateOrder(&order); got != "Ungültige Währung" {
+		t.Fatalf("validateOrder() = %q", got)
 	}
 }
 

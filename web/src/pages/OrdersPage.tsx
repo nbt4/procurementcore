@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import {
   ExternalLink,
+  FileUp,
   Link2,
   PackageCheck,
   Plus,
@@ -14,6 +15,7 @@ import { api, date, euro } from "../lib/api";
 import { warehouseProductsURL } from "../lib/app-paths";
 import type {
   Order,
+  OrderImportPreview,
   OrderLine,
   Product,
   Supplier,
@@ -69,7 +71,8 @@ export default function OrdersPage() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [selected, setSelected] = useState<Order | null>(null);
-  const [create, setCreate] = useState(false);
+  const [create, setCreate] = useState<"manual" | OrderImportPreview | null>(null);
+  const [pdfImport, setPDFImport] = useState(false);
   const [adamHallOrder, setAdamHallOrder] = useState<Order | null>(null);
   const [receipt, setReceipt] = useState<{
     order: Order;
@@ -116,9 +119,14 @@ export default function OrdersPage() {
           </p>
         </div>
         {user.isAdmin && (
-          <Button variant="primary" onClick={() => setCreate(true)}>
-            <Plus size={17} /> Direktbestellung
-          </Button>
+          <div className="catalog-actions">
+            <Button variant="ghost" onClick={() => setPDFImport(true)}>
+              <FileUp size={17} /> Bestellung aus PDF
+            </Button>
+            <Button variant="primary" onClick={() => setCreate("manual")}>
+              <Plus size={17} /> Direktbestellung
+            </Button>
+          </div>
         )}
       </div>
       {rows.length ? (
@@ -304,14 +312,25 @@ export default function OrdersPage() {
           </div>
         </Modal>
       )}
+      {pdfImport && (
+        <PDFOrderImportModal
+          onClose={() => setPDFImport(false)}
+          onPreview={(preview) => {
+            setPDFImport(false);
+            setCreate(preview);
+          }}
+        />
+      )}
       {create && (
         <OrderModal
           suppliers={suppliers}
           products={products}
-          onClose={() => setCreate(false)}
+          initial={create === "manual" ? undefined : create}
+          onClose={() => setCreate(null)}
           onSaved={() => {
-            setCreate(false);
-            notify("Bestellung angelegt");
+            const imported = create !== "manual";
+            setCreate(null);
+            notify(imported ? "PDF-Bestellung angelegt" : "Bestellung angelegt");
             refresh();
           }}
         />
@@ -350,32 +369,104 @@ export default function OrdersPage() {
   );
 }
 
-function OrderModal({
+export function PDFOrderImportModal({
+  onClose,
+  onPreview,
+}: {
+  onClose: () => void;
+  onPreview: (preview: OrderImportPreview) => void;
+}) {
+  const [file, setFile] = useState<File | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const analyze = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!file) return;
+    if (file.size > 12 * 1024 * 1024) {
+      setError("PDF darf maximal 12 MB groß sein.");
+      return;
+    }
+    setLoading(true);
+    setError("");
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      onPreview(await api<OrderImportPreview>("/orders/import-preview", { method: "POST", body: form }));
+    } catch (caught) {
+      setError((caught as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Modal
+      title="Bestellung aus PDF"
+      onClose={onClose}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={loading}>Abbrechen</Button>
+          <Button variant="primary" type="submit" form="pdf-order-import-form" disabled={!file || loading}>
+            <RefreshCw className={loading ? "spin" : ""} size={16} /> {loading ? "PDF wird analysiert …" : "PDF analysieren"}
+          </Button>
+        </>
+      }
+    >
+      <form id="pdf-order-import-form" onSubmit={analyze}>
+        {error && <div className="notice" role="alert">{error}</div>}
+        <Field label="Bestell-PDF">
+          <input
+            type="file"
+            accept="application/pdf,.pdf"
+            required
+            onChange={(event) => setFile(event.target.files?.[0] || null)}
+          />
+        </Field>
+        <p className="import-hint">
+          ProcurementCore liest die Textebene lokal im Service aus und schlägt Lieferant,
+          Bestellnummer, Termine sowie Positionen vor. Die PDF wird nicht dauerhaft gespeichert.
+          Maximal 12 MB und 100 Seiten.
+        </p>
+        {loading && <div className="empty" role="status">PDF-Inhalt und Katalogzuordnungen werden geprüft …</div>}
+      </form>
+    </Modal>
+  );
+}
+
+export function OrderModal({
   suppliers,
   products,
+  initial,
   onClose,
   onSaved,
 }: {
   suppliers: Supplier[];
   products: Product[];
+  initial?: OrderImportPreview;
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [supplierId, setSupplierId] = useState(0);
-  const [expected, setExpected] = useState("");
-  const [supplierOrderNumber, setSupplierOrderNumber] = useState("");
-  const [notes, setNotes] = useState("");
-  const [lines, setLines] = useState<OrderLine[]>([
-    {
-      description: "",
-      quantity: 1,
-      receivedQuantity: 0,
-      unit: "Stk.",
-      unitPriceCents: 0,
-      purchaseUrl: "",
-    },
-  ]);
+  const imported = Boolean(initial);
+  const [supplierId, setSupplierId] = useState(initial?.supplierId || 0);
+  const [expected, setExpected] = useState(initial?.expectedDelivery?.slice(0, 10) || "");
+  const [orderDate, setOrderDate] = useState(initial?.orderDate?.slice(0, 10) || "");
+  const [status, setStatus] = useState(imported ? "sent" : "draft");
+  const [currency, setCurrency] = useState(initial?.currency || "EUR");
+  const [supplierOrderNumber, setSupplierOrderNumber] = useState(initial?.supplierOrderNumber || "");
+  const [notes, setNotes] = useState(initial ? `Nachträglich aus PDF importiert: ${initial.sourceFileName}` : "");
+  const [lines, setLines] = useState<OrderLine[]>(initial?.lines.length
+    ? initial.lines.map((line) => ({ ...line, receivedQuantity: 0 }))
+    : [{
+        description: "",
+        quantity: 1,
+        receivedQuantity: 0,
+        unit: "Stk.",
+        unitPriceCents: 0,
+        purchaseUrl: "",
+      }]);
   const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
 
   const chooseProduct = (index: number, id: number) => {
     const product = products.find((item) => item.id === id);
@@ -399,14 +490,19 @@ function OrderModal({
   };
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    setSaving(true);
+    setError("");
     try {
       await api("/orders", {
         method: "POST",
         body: JSON.stringify({
           supplierId,
-          status: "draft",
-          currency: "EUR",
+          status,
+          currency,
           supplierOrderNumber,
+          orderDate: orderDate
+            ? new Date(`${orderDate}T12:00:00`).toISOString()
+            : null,
           expectedDelivery: expected
             ? new Date(`${expected}T12:00:00`).toISOString()
             : null,
@@ -417,27 +513,49 @@ function OrderModal({
       await onSaved();
     } catch (caught) {
       setError((caught as Error).message);
+    } finally {
+      setSaving(false);
     }
   };
 
   return (
     <Modal
-      title="Direktbestellung"
+      title={imported ? "PDF-Bestellung prüfen" : "Direktbestellung"}
       wide
       onClose={onClose}
       footer={
         <>
-          <Button variant="ghost" onClick={onClose}>
+          <Button variant="ghost" onClick={onClose} disabled={saving}>
             Abbrechen
           </Button>
-          <Button variant="primary" type="submit" form="order-form">
-            Bestellung anlegen
+          <Button variant="primary" type="submit" form="order-form" disabled={saving}>
+            {saving ? "Bestellung wird angelegt …" : imported ? "Importierte Bestellung anlegen" : "Bestellung anlegen"}
           </Button>
         </>
       }
     >
       <form id="order-form" onSubmit={submit}>
-        {error && <div className="notice">{error}</div>}
+        {error && <div className="notice" role="alert">{error}</div>}
+        {initial && (
+          <div className="receipt-inventory">
+            <div className="receipt-inventory-heading">
+              <div>
+                <strong>PDF-Analyse: {initial.confidence}% Erkennungsgrad</strong>
+                <span>{initial.sourceFileName} · {initial.pageCount} Seite(n) · {initial.extractedCharacters} Zeichen</span>
+              </div>
+              <Badge tone={initial.warnings.length ? "amber" : "green"}>
+                {initial.warnings.length ? `${initial.warnings.length} Prüfhinweis(e)` : "Vollständig erkannt"}
+              </Badge>
+            </div>
+            {initial.documentTotalCents > 0 && (
+              <p>
+                Dokument: {new Intl.NumberFormat("de-DE", { style: "currency", currency: initial.currency }).format(initial.documentTotalCents / 100)} ·
+                Positionen: {new Intl.NumberFormat("de-DE", { style: "currency", currency: initial.currency }).format(initial.recognizedTotalCents / 100)}
+              </p>
+            )}
+            {initial.warnings.map((warning) => <span key={warning}>• {warning}</span>)}
+          </div>
+        )}
         <div className="form-grid">
           <Field label="Lieferant">
             <select
@@ -454,6 +572,16 @@ function OrderModal({
               ))}
             </select>
           </Field>
+          {imported && (
+            <Field label="Bestelldatum">
+              <input
+                type="date"
+                required
+                value={orderDate}
+                onChange={(event) => setOrderDate(event.target.value)}
+              />
+            </Field>
+          )}
           <Field label="Erwartete Lieferung">
             <input
               type="date"
@@ -468,6 +596,24 @@ function OrderModal({
               placeholder="z. B. AB-4711"
             />
           </Field>
+          {imported && (
+            <>
+              <Field label="Bestellstatus">
+                <select value={status} onChange={(event) => setStatus(event.target.value)}>
+                  <option value="sent">Gesendet</option>
+                  <option value="confirmed">Bestätigt</option>
+                </select>
+              </Field>
+              <Field label="Währung">
+                <select value={currency} onChange={(event) => setCurrency(event.target.value)}>
+                  <option value="EUR">EUR</option>
+                  <option value="CHF">CHF</option>
+                  <option value="USD">USD</option>
+                  <option value="GBP">GBP</option>
+                </select>
+              </Field>
+            </>
+          )}
           <Field label="Notizen" full>
             <textarea
               value={notes}
@@ -539,7 +685,7 @@ function OrderModal({
                 }
               />
             </Field>
-            <Field label="Preis EUR">
+            <Field label={`Preis ${currency}`}>
               <input
                 type="number"
                 min="0"

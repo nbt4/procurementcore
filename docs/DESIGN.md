@@ -41,6 +41,18 @@ Zahlungsart sowie jede Position und den aktuellen Gesamtpreis. Die verbindliche
 Bestellaktion bleibt bis zur ausdrücklichen Kontrollbestätigung deaktiviert.
 Zugangsdaten und Shopware-Kontext werden nie an den Browser ausgegeben.
 
+## PDF-Bestellimport
+
+Die Bestellungsseite bietet neben der roten Primäraktion für Direktbestellungen
+eine sekundäre PDF-Importaktion. Der erste Dialog enthält Dateiauswahl,
+Größen-/Seitenlimit sowie einen stabilen Lade- und Fehlerzustand. Nach der
+Analyse folgt das bestehende breite Bestellformular mit allen editierbaren
+Feldern. Erkennungsgrad, Quelldatei, Summenabweichung und einzelne Prüfhinweise
+stehen vor den Formularfeldern und verwenden ausschließlich die semantischen
+Suite-Zustände. Die Anlage bleibt eine ausdrückliche Primäraktion; ein Upload
+allein erzeugt noch keine Bestellung. Mobile Formulare und Positionszeilen
+brechen gemäß den bestehenden Regeln einspaltig beziehungsweise zweispaltig um.
+
 ## Implementierung
 
 `web/src/cores-theme.css` und `web/src/lib/cores-design.ts` sind generierte Dateien. Änderungen erfolgen in den kanonischen Quellen des Umbrella-Repositories und werden dort synchronisiert und geprüft. Lokale Komponenten verwenden die `suite-*`-Primitives und dürfen sie nur fachlich ergänzen.

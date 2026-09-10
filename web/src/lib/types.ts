@@ -200,6 +200,22 @@ export type Order = {
   createdAt: string;
   lines: OrderLine[];
 };
+export type OrderImportPreview = {
+  sourceFileName: string;
+  pageCount: number;
+  extractedCharacters: number;
+  supplierId?: number;
+  supplierName?: string;
+  supplierOrderNumber: string;
+  orderDate?: string;
+  expectedDelivery?: string;
+  currency: string;
+  documentTotalCents: number;
+  recognizedTotalCents: number;
+  confidence: number;
+  warnings: string[];
+  lines: OrderLine[];
+};
 export type AdamHallCartLine = {
   productNumber: string;
   description: string;

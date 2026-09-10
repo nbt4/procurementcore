@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"net/url"
@@ -15,6 +16,7 @@ import (
 
 	"procurementcore/internal/auth"
 	"procurementcore/internal/models"
+	"procurementcore/internal/orderimport"
 	"procurementcore/internal/scraper"
 	"procurementcore/internal/service"
 
@@ -72,6 +74,7 @@ func (h *Handler) Routes() http.Handler {
 	r.With(auth.RequireAdmin).Post("/requisitions/{id}/order", h.convertRequisition)
 	r.Get("/orders", h.listOrders)
 	r.Get("/orders/{id}", h.getOrder)
+	r.With(auth.RequireAdmin).Post("/orders/import-preview", h.previewOrderImport)
 	r.With(auth.RequireAdmin).Post("/orders", h.createOrder)
 	r.With(auth.RequireAdmin).Put("/orders/{id}", h.updateOrder)
 	r.With(auth.RequireAdmin).Post("/orders/{id}/adam-hall/cart", h.previewAdamHallOrder)
@@ -95,6 +98,75 @@ func (h *Handler) importProductPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, preview)
+}
+
+func (h *Handler) previewOrderImport(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, orderimport.MaxPDFBytes+(1<<20))
+	if err := r.ParseMultipartForm(orderimport.MaxPDFBytes); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "PDF darf maximal 12 MB groß sein"})
+		} else {
+			badRequest(w, "Ungültiger PDF-Upload")
+		}
+		return
+	}
+	if r.MultipartForm != nil {
+		defer r.MultipartForm.RemoveAll()
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		badRequest(w, "PDF-Datei ist erforderlich")
+		return
+	}
+	defer file.Close()
+	if header.Size <= 0 || header.Size > orderimport.MaxPDFBytes {
+		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "PDF darf maximal 12 MB groß sein"})
+		return
+	}
+	data, err := io.ReadAll(io.LimitReader(file, orderimport.MaxPDFBytes+1))
+	if err != nil || len(data) > orderimport.MaxPDFBytes {
+		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "PDF darf maximal 12 MB groß sein"})
+		return
+	}
+	text, pages, err := orderimport.ExtractText(data)
+	if err != nil {
+		badRequest(w, err.Error())
+		return
+	}
+
+	var supplierRows []models.Supplier
+	if err := h.db.Where("active = ?", true).Order("name").Find(&supplierRows).Error; err != nil {
+		serverError(w, err)
+		return
+	}
+	var productRows []models.Product
+	if err := h.db.Where("active = ?", true).
+		Preload("Offers", "active = ?", true).
+		Order("name").Find(&productRows).Error; err != nil {
+		serverError(w, err)
+		return
+	}
+	suppliers := make([]orderimport.SupplierHint, 0, len(supplierRows))
+	for _, supplier := range supplierRows {
+		suppliers = append(suppliers, orderimport.SupplierHint{
+			ID: supplier.ID, Name: supplier.Name, Code: supplier.Code,
+			Website: supplier.Website, Email: supplier.Email,
+		})
+	}
+	products := make([]orderimport.ProductHint, 0, len(productRows))
+	for _, product := range productRows {
+		offers := make([]orderimport.OfferHint, 0, len(product.Offers))
+		for _, offer := range product.Offers {
+			offers = append(offers, orderimport.OfferHint{
+				SupplierID: offer.SupplierID, SupplierSKU: offer.SupplierSKU, PurchaseURL: offer.PurchaseURL,
+			})
+		}
+		products = append(products, orderimport.ProductHint{
+			ID: product.ID, SKU: product.SKU, Name: product.Name, Unit: product.Unit, Offers: offers,
+		})
+	}
+	writeJSON(w, http.StatusOK, orderimport.Analyze(header.Filename, text, pages, suppliers, products))
 }
 
 func (h *Handler) me(w http.ResponseWriter, r *http.Request) {
@@ -1041,6 +1113,23 @@ func validateOrder(row *models.PurchaseOrder) string {
 	if row.SupplierID == 0 || len(row.Lines) == 0 {
 		return "Lieferant und mindestens eine Position sind erforderlich"
 	}
+	if row.Status == "" {
+		row.Status = "draft"
+	}
+	if !map[string]bool{"draft": true, "sent": true, "confirmed": true}[row.Status] {
+		return "Ungültiger initialer Bestellstatus"
+	}
+	row.Currency = strings.ToUpper(strings.TrimSpace(row.Currency))
+	if row.Currency == "" {
+		row.Currency = "EUR"
+	}
+	if !map[string]bool{"EUR": true, "CHF": true, "USD": true, "GBP": true}[row.Currency] {
+		return "Ungültige Währung"
+	}
+	row.SupplierOrderNumber = normalizeSupplierOrderNumber(row.SupplierOrderNumber)
+	if len([]rune(row.SupplierOrderNumber)) > 120 {
+		return "Lieferanten-Bestellnummer darf maximal 120 Zeichen lang sein"
+	}
 	for i := range row.Lines {
 		if row.Lines[i].Description == "" || row.Lines[i].Quantity <= 0 || row.Lines[i].UnitPriceCents < 0 {
 			return "Ungültige Bestellposition"
@@ -1050,10 +1139,6 @@ func validateOrder(row *models.PurchaseOrder) string {
 		}
 	}
 	row.TotalCents = service.PurchaseOrderTotal(row.Lines)
-	if row.Currency == "" {
-		row.Currency = "EUR"
-	}
-	row.SupplierOrderNumber = normalizeSupplierOrderNumber(row.SupplierOrderNumber)
 	return ""
 }
 
@@ -1072,8 +1157,9 @@ func (h *Handler) createOrder(w http.ResponseWriter, r *http.Request) {
 	}
 	user := auth.CurrentUser(r)
 	row.ID, row.Number, row.OrderedBy, row.OrderedByName = 0, nextNumber("PO"), user.ID, user.Username
-	if row.Status == "" {
-		row.Status = "draft"
+	if row.Status != "draft" && row.OrderDate == nil {
+		now := time.Now()
+		row.OrderDate = &now
 	}
 	for i := range row.Lines {
 		row.Lines[i].ID, row.Lines[i].PurchaseOrderID = 0, 0

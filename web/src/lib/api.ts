@@ -3,10 +3,12 @@ import { appPath, centralLoginURL } from './app-paths'
 export const apiBase = appPath('/api/v1')
 
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const headers = new Headers(options.headers)
+  if (!(options.body instanceof FormData) && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
   const response = await fetch(`${apiBase}${path}`, {
     credentials: 'include',
     ...options,
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    headers,
   })
   if (response.status === 401) {
     window.location.href = centralLoginURL()

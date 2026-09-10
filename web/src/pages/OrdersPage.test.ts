@@ -1,9 +1,9 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import type { Product } from "../lib/types";
+import type { OrderImportPreview, Product, Supplier } from "../lib/types";
 import { ADAM_HALL_CART_URL, AdamHallCartLink, isAdamHallSupplier } from "../components/AdamHallOrderModal";
-import { receiptInventoryMessage } from "./OrdersPage";
+import { OrderModal, PDFOrderImportModal, receiptInventoryMessage } from "./OrdersPage";
 
 const product = (values: Partial<Product>): Product =>
   ({
@@ -74,5 +74,46 @@ describe("AdamHallCartLink", () => {
     expect(markup).toContain(`href="${ADAM_HALL_CART_URL}"`);
     expect(markup).toContain('target="_blank"');
     expect(markup).toContain('rel="noopener noreferrer"');
+  });
+});
+
+describe("PDF order import", () => {
+  const supplier = {
+    id: 7, name: "Adam Hall GmbH", code: "AH", website: "https://www.adamhall.com",
+    contactName: "", email: "", phone: "", paymentTerms: "", defaultLeadDays: 0,
+    rating: 0, preferred: true, active: true, riskLevel: "low", notes: "",
+  } as Supplier;
+
+  it("offers a PDF-only upload before analysis", () => {
+    const markup = renderToStaticMarkup(createElement(PDFOrderImportModal, {
+      onClose: () => undefined,
+      onPreview: () => undefined,
+    }));
+
+    expect(markup).toContain("Bestellung aus PDF");
+    expect(markup).toContain('type="file"');
+    expect(markup).toContain('accept="application/pdf,.pdf"');
+    expect(markup).toContain("Die PDF wird nicht dauerhaft gespeichert");
+  });
+
+  it("renders extracted values in the editable order form", () => {
+    const preview: OrderImportPreview = {
+      sourceFileName: "order.pdf", pageCount: 2, extractedCharacters: 900,
+      supplierId: supplier.id, supplierName: supplier.name, supplierOrderNumber: "INV-42",
+      orderDate: "2026-09-08T12:00:00Z", expectedDelivery: "2026-09-12T12:00:00Z",
+      currency: "EUR", documentTotalCents: 1250, recognizedTotalCents: 1250,
+      confidence: 87, warnings: ["Preis prüfen"],
+      lines: [{ description: "Patchkabel", quantity: 5, receivedQuantity: 0, unit: "Stk.", unitPriceCents: 250, purchaseUrl: "" }],
+    };
+    const markup = renderToStaticMarkup(createElement(OrderModal, {
+      suppliers: [supplier], products: [], initial: preview,
+      onClose: () => undefined, onSaved: () => undefined,
+    }));
+
+    expect(markup).toContain("PDF-Bestellung prüfen");
+    expect(markup).toContain("87% Erkennungsgrad");
+    expect(markup).toContain('value="INV-42"');
+    expect(markup).toContain('value="2026-09-08"');
+    expect(markup).toContain("Importierte Bestellung anlegen");
   });
 });
