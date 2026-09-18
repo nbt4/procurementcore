@@ -1,5 +1,12 @@
 # ProcurementCore
 
+## Robuster Datenbankstart (1.0.35)
+
+Die GORM-Modelle behandeln die bereits in den SQL-Basismigrationen vorhandenen
+Eindeutigkeitsregeln jetzt als PostgreSQL-Constraints. Dadurch bleiben frische
+Umbrella-Datenbanken beim automatischen Schemaabgleich unverändert und der
+Dienst startet ohne manuelles Löschen seiner Tabellen.
+
 ## Bestellungen aus PDF nacherfassen (1.0.34)
 
 Administratoren können bereits getätigte Bestellungen über eine PDF mit

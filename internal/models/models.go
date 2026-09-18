@@ -8,7 +8,7 @@ import (
 type Supplier struct {
 	ID              uint      `gorm:"primaryKey" json:"id"`
 	Name            string    `gorm:"size:180;not null;index" json:"name"`
-	Code            string    `gorm:"size:40;uniqueIndex;not null" json:"code"`
+	Code            string    `gorm:"size:40;unique;not null" json:"code"`
 	Website         string    `gorm:"size:1000" json:"website"`
 	ContactName     string    `gorm:"size:160" json:"contactName"`
 	Email           string    `gorm:"size:255" json:"email"`
@@ -26,7 +26,7 @@ type Supplier struct {
 
 type Category struct {
 	ID              uint            `gorm:"primaryKey" json:"id"`
-	Name            string          `gorm:"size:160;uniqueIndex;not null" json:"name"`
+	Name            string          `gorm:"size:160;unique;not null" json:"name"`
 	Description     string          `gorm:"type:text" json:"description"`
 	ParameterSchema json.RawMessage `gorm:"type:jsonb;default:'[]'" json:"parameterSchema"`
 	CreatedAt       time.Time       `json:"createdAt"`
@@ -35,7 +35,7 @@ type Category struct {
 
 type Product struct {
 	ID                     uint            `gorm:"primaryKey" json:"id"`
-	SKU                    string          `gorm:"size:80;uniqueIndex;not null" json:"sku"`
+	SKU                    string          `gorm:"size:80;unique;not null" json:"sku"`
 	Name                   string          `gorm:"size:240;not null;index" json:"name"`
 	Description            string          `gorm:"type:text" json:"description"`
 	CategoryID             *uint           `gorm:"index" json:"categoryId"`
@@ -118,7 +118,7 @@ type PriceAlert struct {
 
 type Requisition struct {
 	ID                  uint              `gorm:"primaryKey" json:"id"`
-	Number              string            `gorm:"size:40;uniqueIndex;not null" json:"number"`
+	Number              string            `gorm:"size:40;unique;not null" json:"number"`
 	Title               string            `gorm:"size:240;not null" json:"title"`
 	Status              string            `gorm:"size:30;default:'draft';index" json:"status"`
 	RequesterID         uint              `gorm:"not null;index" json:"requesterId"`
@@ -152,7 +152,7 @@ type RequisitionLine struct {
 
 type PurchaseOrder struct {
 	ID                  uint                `gorm:"primaryKey" json:"id"`
-	Number              string              `gorm:"size:40;uniqueIndex;not null" json:"number"`
+	Number              string              `gorm:"size:40;unique;not null" json:"number"`
 	SupplierOrderNumber string              `gorm:"size:120;index" json:"supplierOrderNumber"`
 	SupplierID          uint                `gorm:"not null;index" json:"supplierId"`
 	Supplier            *Supplier           `json:"supplier,omitempty"`
