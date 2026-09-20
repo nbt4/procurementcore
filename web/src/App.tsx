@@ -31,6 +31,7 @@ import OrdersPage from "./pages/OrdersPage";
 import ProductLinksPage from "./pages/ProductLinksPage";
 import { appAssetPath, centralLoginURL, dashboardURL } from "./lib/app-paths";
 import { SuiteCoreNavigation } from "./components/SuiteCoreNavigation";
+import { SuiteLanguageSwitcher } from "./lib/SuiteLanguageSwitcher";
 
 type AppContextValue = {
   user: User;
@@ -139,6 +140,7 @@ function Shell({
           <SuiteCoreNavigation current="procurement" dashboardURL={dashboardURL} compact={!sidebarExpanded} />
         </nav>
         <div className="sidebar-footer">
+          <SuiteLanguageSwitcher compact={!sidebarExpanded} />
           <div className="user">
             <div className="avatar">
               {(user.displayName || user.username).slice(0, 1).toUpperCase()}
@@ -165,6 +167,7 @@ function Shell({
       </aside>
       <header className="mobile-header">
         <span className="mobile-actions">
+          <SuiteLanguageSwitcher compact />
           <span className="badge accent">
             <Menu size={13} />
             {active?.label}

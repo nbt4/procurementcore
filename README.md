@@ -1,5 +1,12 @@
 # ProcurementCore
 
+## Deutsch und Englisch (1.0.36)
+
+Die Sidebar bietet die gemeinsame Cores-Sprachwahl. Einkaufsnavigation, häufige
+Aktionen, Tabellen- und Formularbegriffe sowie zugängliche Beschriftungen werden
+auf Englisch oder Deutsch dargestellt; die Auswahl bleibt beim Core-Wechsel
+erhalten.
+
 ## Robuster Datenbankstart (1.0.35)
 
 Die GORM-Modelle behandeln die bereits in den SQL-Basismigrationen vorhandenen

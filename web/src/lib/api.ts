@@ -1,4 +1,5 @@
 import { appPath, centralLoginURL } from './app-paths'
+import { suiteLocale } from './cores-design'
 
 export const apiBase = appPath('/api/v1')
 
@@ -22,6 +23,6 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   return response.json() as Promise<T>
 }
 
-export const euro = (cents = 0) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(cents / 100)
-export const date = (value?: string) => value ? new Intl.DateTimeFormat('de-DE').format(new Date(value)) : '–'
-export const dateTime = (value?: string) => value ? new Intl.DateTimeFormat('de-DE', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value)) : '–'
+export const euro = (cents = 0) => new Intl.NumberFormat(suiteLocale(), { style: 'currency', currency: 'EUR' }).format(cents / 100)
+export const date = (value?: string) => value ? new Intl.DateTimeFormat(suiteLocale()).format(new Date(value)) : '–'
+export const dateTime = (value?: string) => value ? new Intl.DateTimeFormat(suiteLocale(), { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value)) : '–'

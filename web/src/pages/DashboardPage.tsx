@@ -6,7 +6,7 @@ import {
 import { api, dateTime, euro } from '../lib/api'
 import type { Dashboard } from '../lib/types'
 import { useApp } from '../App'
-import { suiteDateLabel, suiteGreeting } from '../lib/cores-design'
+import { suiteDateLabel, suiteGreeting, suiteLocale } from '../lib/cores-design'
 
 export default function DashboardPage() {
   const { user, refreshKey, refresh } = useApp()
@@ -40,7 +40,7 @@ export default function DashboardPage() {
           <p className="suite-dashboard-subtitle">Bedarfe, Bezugsquellen und Bestellungen auf einem Stand.</p>
         </div>
         <div className="suite-dashboard-actions">
-          {lastUpdated && <span className="suite-dashboard-timestamp">Aktualisiert {lastUpdated.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}</span>}
+          {lastUpdated && <span className="suite-dashboard-timestamp">Aktualisiert {lastUpdated.toLocaleTimeString(suiteLocale(), { hour: '2-digit', minute: '2-digit' })}</span>}
           <button type="button" className="suite-button" onClick={refresh} disabled={loading}>
             <RefreshCw size={16} className={loading ? 'spin' : ''} />Aktualisieren
           </button>
