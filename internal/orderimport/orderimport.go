@@ -39,11 +39,13 @@ type OfferHint struct {
 }
 
 type ProductHint struct {
-	ID     uint
-	SKU    string
-	Name   string
-	Unit   string
-	Offers []OfferHint
+	ID           uint
+	SKU          string
+	Name         string
+	Unit         string
+	Manufacturer string
+	Model        string
+	Offers       []OfferHint
 }
 
 type Line struct {
@@ -54,6 +56,8 @@ type Line struct {
 	Unit             string  `json:"unit"`
 	UnitPriceCents   int64   `json:"unitPriceCents"`
 	PurchaseURL      string  `json:"purchaseUrl"`
+	MatchMethod      string  `json:"matchMethod,omitempty"`
+	MatchConfidence  float64 `json:"matchConfidence,omitempty"`
 }
 
 type Preview struct {
@@ -414,12 +418,14 @@ func extractLines(text string, supplierID uint, products []ProductHint) []Line {
 			quantity, price := lineNumbers(contextLine)
 			productID := candidate.product.ID
 			result = append(result, Line{
-				ProductID:      &productID,
-				Description:    candidate.product.Name,
-				Quantity:       quantity,
-				Unit:           first(candidate.product.Unit, "Stk."),
-				UnitPriceCents: price,
-				PurchaseURL:    productPurchaseURL(candidate.product, supplierID),
+				ProductID:       &productID,
+				Description:     candidate.product.Name,
+				Quantity:        quantity,
+				Unit:            first(candidate.product.Unit, "Stk."),
+				UnitPriceCents:  price,
+				PurchaseURL:     productPurchaseURL(candidate.product, supplierID),
+				MatchMethod:     "deterministic",
+				MatchConfidence: 100,
 			})
 			usedProducts[candidate.product.ID], usedLines[index] = true, true
 			break

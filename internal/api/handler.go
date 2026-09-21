@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"procurementcore/internal/auth"
+	"procurementcore/internal/jev"
 	"procurementcore/internal/models"
 	"procurementcore/internal/orderimport"
 	"procurementcore/internal/scraper"
@@ -28,10 +29,11 @@ import (
 type Handler struct {
 	db      *gorm.DB
 	scraper *scraper.Fetcher
+	jev     *jev.Client
 }
 
 func NewHandler(db *gorm.DB, productScraper *scraper.Fetcher) *Handler {
-	return &Handler{db: db, scraper: productScraper}
+	return &Handler{db: db, scraper: productScraper, jev: jev.FromEnv()}
 }
 
 func (h *Handler) Routes() http.Handler {
@@ -163,10 +165,13 @@ func (h *Handler) previewOrderImport(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 		products = append(products, orderimport.ProductHint{
-			ID: product.ID, SKU: product.SKU, Name: product.Name, Unit: product.Unit, Offers: offers,
+			ID: product.ID, SKU: product.SKU, Name: product.Name, Unit: product.Unit,
+			Manufacturer: product.Manufacturer, Model: product.Model, Offers: offers,
 		})
 	}
-	writeJSON(w, http.StatusOK, orderimport.Analyze(header.Filename, text, pages, suppliers, products))
+	preview := orderimport.Analyze(header.Filename, text, pages, suppliers, products)
+	h.enrichOrderImportWithJev(r.Context(), &preview, products)
+	writeJSON(w, http.StatusOK, preview)
 }
 
 func (h *Handler) me(w http.ResponseWriter, r *http.Request) {

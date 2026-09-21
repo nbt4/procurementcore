@@ -1,5 +1,17 @@
 # ProcurementCore
 
+## Jev-gestützter Produktabgleich (1.0.37)
+
+Die editierbare PDF-Bestellvorschau kann zuvor nicht erkannte Positionen mit
+Jev über OpenRouter gegen den Procurement-Katalog entscheiden. Der
+Procurement-/Warehouse-Abgleich nutzt dieselbe Entscheidungsschicht nur zum
+Neuordnen unverknüpfter Kandidaten; die eigentliche Verknüpfung bleibt eine
+bewusste Benutzeraktion. Exakte SKU-/Alias-Treffer haben weiterhin Vorrang.
+Ohne `OPENROUTER_API_KEY`, bei Timeout oder unterhalb
+`JEV_MIN_CONFIDENCE` bleibt das bestehende deterministische Ergebnis erhalten.
+An OpenRouter gehen nur die einzelne Positionsbeschreibung und begrenzte
+Kandidatenstammdaten, niemals die vollständige PDF.
+
 ## Deutsch und Englisch (1.0.36)
 
 Die Sidebar bietet die gemeinsame Cores-Sprachwahl. Einkaufsnavigation, häufige
@@ -96,6 +108,7 @@ ProcurementCore ist der Einkaufs-Service des Cores-Ökosystems. Er verbindet Bed
 - Tiefpreis-Alarme, die bei neuen oder geänderten Angeboten automatisch auslösen
 - Bedarfsmeldungen mit Entwurf, Einreichung, Freigabe, Ablehnung, Bestellkonvertierung und direkten Links von Katalogpositionen zum Artikel sowie zur hinterlegten Produktseite
 - Nachträgliche Bestellerfassung aus maschinenlesbaren PDFs mit automatischer Lieferanten-, Metadaten-, Positions- und Katalogerkennung sowie editierbarer Prüfung vor dem Speichern
+- Optionaler Jev-Entscheidungsabgleich für noch offene PDF-Positionen und Warehouse-Kandidaten, mit Confidence-Schwelle und deterministischem Fallback
 - Server-seitig erzeugte Adam-Hall-Warenkörbe für freigegebene Bedarfe und Bestellungsentwürfe: Konto, Lieferadresse, Zahlungsart, Positionen und Live-Gesamtpreis werden vor der verbindlichen Übertragung geprüft; der Warenkorb lässt sich zusätzlich im offiziellen Shop öffnen, und die Adam-Hall-Bestellnummer sowie finalen Preise fließen zurück in ProcurementCore
 - Produktabgleich mit WarehouseCore: bestehende Artikel werden anhand EAN/GTIN, Herstellerartikelnummer, Modell, Hersteller und Name vorgeschlagen und anschließend eindeutig verknüpft
 - Direkte Übernahme eines Procurement-Artikels in den vollständigen Warehouse-Produktdialog; erkannte Stammdaten und technische Attribute sind vorausgefüllt, bleiben aber bearbeitbar
@@ -122,6 +135,12 @@ go run ./cmd/server
 ```
 
 Der Service läuft standardmäßig auf Port `8084`. `CORES_JWT_SECRET` und die PostgreSQL-Zugangsdaten müssen denen des Cores-Stacks entsprechen. `WAREHOUSECORE_PUBLIC_URL` steuert die serviceübergreifenden Links zum Warehouse-Produktstamm.
+
+Jev ist optional. `OPENROUTER_API_KEY` aktiviert die Entscheidungsschicht;
+`JEV_MODEL` ist standardmäßig `typesafe/jev-1.13`, `JEV_TIMEOUT` auf `3s` und
+`JEV_MIN_CONFIDENCE` auf `0.70` gesetzt. `JEV_ENABLED=false` deaktiviert sie
+explizit. Der Key gehört ausschließlich in die Laufzeitumgebung oder einen
+Secret-Store und niemals ins Repository.
 
 Der Linkimport ruft ausschließlich öffentliche HTTP(S)-Ziele auf Standardports ab, begrenzt Laufzeit und Weiterleitungen und blockiert interne, lokale sowie Link-Local-Netze. Von sehr großen Shopseiten werden höchstens die ersten 16 MB verarbeitet; liegen die Produktdaten wie üblich früh im Dokument, funktioniert der Import auch bei insgesamt größeren Seiten. Neben JSON-LD und OpenGraph verarbeitet der Import schema.org-Microdata und die vom Server deklarierte HTML-Zeichenkodierung. Eigene Shop-Adapter übernehmen bei LTT, Huss Licht & Ton, Thomann und Steinigke Artikelnummern, Marken, Preise und technische Tabellen; ab-in-die-BOX wird für Euroboxen direkt aus der sichtbaren Buybox gelesen, damit fehlerhafte Zubehörpreise im JSON-LD nicht in den Katalog gelangen. Caseman und aweo werden als Casebau-Quellen erkannt. Adam-Hall-Shopseiten werden zusätzlich anhand ihrer serverseitig gerenderten Artikeldaten erkannt. Sind `ADAMHALL_USERNAME` und `ADAMHALL_PASSWORD` als Laufzeit-Secrets gesetzt, führt ProcurementCore den offiziellen Azure-B2C-PKCE-Login ausschließlich serverseitig aus, ergänzt kundenspezifische Preise und baut aus Adam-Hall-Bestellungsentwürfen einen prüfbaren Live-Warenkorb auf. Die Zugangsdaten und der Shopware-Kontext verlassen dabei nie den Server; erst die ausdrücklich bestätigte Aktion „Verbindlich bestellen“ erzeugt die Lieferantenbestellung. Blockiert STE᙭24 den direkten HTML-Abruf mit einer Cloudflare-Challenge, verifiziert ProcurementCore den Produktlink gegen die offizielle STE᙭24-Sitemap und erzeugt aus der kanonischen Produkt-URL eine als eingeschränkt gekennzeichnete Vorschau mit Artikelnummer, Hersteller und erkennbaren Variantenmerkmalen; nicht öffentlich verfügbare Werte wie der Preis bleiben leer. Alle erkannten Originalattribute werden unabhängig von einer Kategorie am Artikel gespeichert, in der Detailansicht angezeigt und von der Katalogsuche berücksichtigt; passende Kategoriefelder werden zusätzlich als typisierte Parameter geführt. JavaScript-only-Shops oder andere Seiten mit Bot-Schutz können unvollständige Daten liefern; alle erkannten Werte bleiben deshalb vor dem Import editierbar.
 

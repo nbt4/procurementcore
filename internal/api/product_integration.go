@@ -204,7 +204,7 @@ func rankedWarehouseCandidates(product models.Product, warehouse []warehouseProd
 	return rows
 }
 
-func (h *Handler) listProductLinks(w http.ResponseWriter, _ *http.Request) {
+func (h *Handler) listProductLinks(w http.ResponseWriter, r *http.Request) {
 	var products []models.Product
 	if err := h.db.Where("active = ?", true).Order("name").Find(&products).Error; err != nil {
 		serverError(w, err)
@@ -242,6 +242,7 @@ func (h *Handler) listProductLinks(w http.ResponseWriter, _ *http.Request) {
 		}
 		result = append(result, item)
 	}
+	h.enrichProductLinkCandidatesWithJev(r.Context(), result, products, warehouse)
 	writeJSON(w, http.StatusOK, map[string]any{"items": result, "warehouseProducts": warehouse})
 }
 
@@ -260,7 +261,9 @@ func (h *Handler) warehouseCandidates(w http.ResponseWriter, r *http.Request) {
 		serverError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, rankedWarehouseCandidates(product, warehouse))
+	items := []productLinkOverview{{ProcurementProductID: product.ID, Candidates: rankedWarehouseCandidates(product, warehouse)}}
+	h.enrichProductLinkCandidatesWithJev(r.Context(), items, []models.Product{product}, warehouse)
+	writeJSON(w, http.StatusOK, items[0].Candidates)
 }
 
 func (h *Handler) linkWarehouseProduct(w http.ResponseWriter, r *http.Request) {
