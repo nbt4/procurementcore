@@ -196,6 +196,8 @@ type Receipt struct {
 	WarehouseQuantityApplied  float64   `json:"warehouseQuantityApplied"`
 	WarehouseStockAfter       float64   `gorm:"-" json:"warehouseStockAfter,omitempty"`
 	WarehouseDeviceCountAfter int64     `gorm:"-" json:"warehouseDeviceCountAfter,omitempty"`
+	CreatedDeviceIDs          []string  `gorm:"-" json:"createdDeviceIds,omitempty"`
+	PutawayTaskID             *int64    `gorm:"-" json:"putawayTaskId,omitempty"`
 	ReceivedAt                time.Time `json:"receivedAt"`
 }
 
@@ -208,6 +210,17 @@ type Activity struct {
 	Username   string    `gorm:"size:160" json:"username"`
 	Details    string    `gorm:"type:text" json:"details"`
 	CreatedAt  time.Time `gorm:"index" json:"createdAt"`
+}
+
+type IdempotencyRecord struct {
+	ID          uint            `gorm:"primaryKey" json:"id"`
+	UserID      uint            `gorm:"not null;uniqueIndex:idx_proc_idempotency,priority:1" json:"userId"`
+	Operation   string          `gorm:"size:80;not null;uniqueIndex:idx_proc_idempotency,priority:2" json:"operation"`
+	KeyHash     string          `gorm:"size:64;not null;uniqueIndex:idx_proc_idempotency,priority:3" json:"-"`
+	RequestHash string          `gorm:"size:64;not null" json:"-"`
+	Response    json.RawMessage `gorm:"type:jsonb;not null;default:'{}'" json:"response"`
+	StatusCode  int             `gorm:"not null;default:200" json:"statusCode"`
+	CreatedAt   time.Time       `gorm:"index" json:"createdAt"`
 }
 
 func (Supplier) TableName() string          { return "proc_suppliers" }
@@ -223,3 +236,4 @@ func (PurchaseOrder) TableName() string     { return "proc_purchase_orders" }
 func (PurchaseOrderLine) TableName() string { return "proc_purchase_order_lines" }
 func (Receipt) TableName() string           { return "proc_receipts" }
 func (Activity) TableName() string          { return "proc_activities" }
+func (IdempotencyRecord) TableName() string { return "proc_idempotency_records" }

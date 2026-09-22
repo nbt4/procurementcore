@@ -1,5 +1,22 @@
 # ProcurementCore
 
+## Abgesicherte MCP-Freigaben und Wareneingänge (1.0.38)
+
+ProcurementCore unterstützt jetzt die eng begrenzten MCP-Lifecycle-Prozesse aus
+Cores MCP 1.5.0. Bedarfsentscheidungen erzwingen das Vier-Augen-Prinzip und
+akzeptieren neben Genehmigung und Ablehnung auch eine begründete Rückgabe.
+Entscheidungen und Wareneingänge prüfen die in der Vorschau gelesene
+`expectedUpdatedAt`-Version. MCP/KI-Aufrufe benötigen außerdem einen
+`Idempotency-Key`; Schlüssel, Payload-Hash und Antwort werden in derselben
+Transaktion wie die Fachänderung gespeichert.
+
+Wareneingänge unterstützen Teil-, Voll- und ausdrücklich markierte
+Überlieferungen. Für einzeln verfolgte Artikel ist pro Gerät eine eindeutige
+Seriennummer erforderlich. Bestand beziehungsweise Geräte und ein offener
+Putaway-Task entstehen atomar mit Receipt und Bestellstatus. Aktivitäten tragen
+die Herkunft `MCP/AI`, während Browser-Operationen als `UI` gekennzeichnet
+werden.
+
 ## Jev-gestützter Produktabgleich (1.0.37)
 
 Die editierbare PDF-Bestellvorschau kann zuvor nicht erkannte Positionen mit
@@ -106,13 +123,13 @@ ProcurementCore ist der Einkaufs-Service des Cores-Ökosystems. Er verbindet Bed
 - Lieferantenstamm mit Preferred-Status, Konditionen, Lieferzeit, Bewertung und Risiko
 - Mehrere Angebote pro Artikel mit Einkaufslink, Mindestmenge, Packgröße und Preisverlauf
 - Tiefpreis-Alarme, die bei neuen oder geänderten Angeboten automatisch auslösen
-- Bedarfsmeldungen mit Entwurf, Einreichung, Freigabe, Ablehnung, Bestellkonvertierung und direkten Links von Katalogpositionen zum Artikel sowie zur hinterlegten Produktseite
+- Bedarfsmeldungen mit Entwurf, Einreichung, Vier-Augen-Freigabe, Ablehnung, begründeter Rückgabe, Bestellkonvertierung und direkten Links von Katalogpositionen zum Artikel sowie zur hinterlegten Produktseite
 - Nachträgliche Bestellerfassung aus maschinenlesbaren PDFs mit automatischer Lieferanten-, Metadaten-, Positions- und Katalogerkennung sowie editierbarer Prüfung vor dem Speichern
 - Optionaler Jev-Entscheidungsabgleich für noch offene PDF-Positionen und Warehouse-Kandidaten, mit Confidence-Schwelle und deterministischem Fallback
 - Server-seitig erzeugte Adam-Hall-Warenkörbe für freigegebene Bedarfe und Bestellungsentwürfe: Konto, Lieferadresse, Zahlungsart, Positionen und Live-Gesamtpreis werden vor der verbindlichen Übertragung geprüft; der Warenkorb lässt sich zusätzlich im offiziellen Shop öffnen, und die Adam-Hall-Bestellnummer sowie finalen Preise fließen zurück in ProcurementCore
 - Produktabgleich mit WarehouseCore: bestehende Artikel werden anhand EAN/GTIN, Herstellerartikelnummer, Modell, Hersteller und Name vorgeschlagen und anschließend eindeutig verknüpft
 - Direkte Übernahme eines Procurement-Artikels in den vollständigen Warehouse-Produktdialog; erkannte Stammdaten und technische Attribute sind vorausgefüllt, bleiben aber bearbeitbar
-- Direktbestellungen, Lieferstatus sowie Teil- und Komplettwareneingänge mit transaktionaler Warehouse-Bestandsbuchung für verknüpfte Artikel
+- Direktbestellungen, Lieferstatus sowie Teil-, Komplett- und ausdrücklich bestätigte Überlieferungen mit transaktionaler Warehouse-Bestands-/Gerätebuchung und Putaway-Task für verknüpfte Artikel
 - Spend-, Einsparungs- und Aktivitätsübersicht sowie CSV-Export
 - Gemeinsames Cores-SSO über `cores_token` mit zentralem Login, validiertem Rücksprung zur zuvor geöffneten Procurement-Ansicht und serviceübergreifendem Logout
 - Zentrales Branding und responsive, dunkel gehaltene Cores-Oberfläche für Desktop und Mobilgeräte
@@ -161,8 +178,8 @@ Im Gesamt-Stack läuft ProcurementCore als eigener Compose-Service auf Host-Port
 
 ## API
 
-Alle fachlichen Endpunkte liegen unter `/api/v1` und erwarten das gemeinsame SSO-Cookie oder einen Bearer-Token. Wichtige Ressourcen sind `/products`, `/product-links`, `/suppliers`, `/alerts`, `/requisitions`, `/orders`, `/dashboard` und `/export/spend.csv`. Über `/products/:id/warehouse-link` werden bestehende Produkte verknüpft oder wieder getrennt. Admins prüfen mit `POST /orders/:id/adam-hall/cart` einen serverseitigen Live-Warenkorb und übertragen ihn mit `POST /orders/:id/adam-hall/order` verbindlich; zulässig sind ausschließlich Entwürfe eines eindeutig erkannten Adam-Hall-Lieferanten mit ganzzahligen Katalogpositionen. `POST /orders/:id/receipt` sperrt die Bestellposition, dokumentiert den Eingang und aktualisiert bei verknüpften Artikeln atomar Mengenbestand oder Devices in WarehouseCore. `GET /health` und `GET /api/v1/branding` sind öffentlich.
+Alle fachlichen Endpunkte liegen unter `/api/v1` und erwarten das gemeinsame SSO-Cookie oder einen Bearer-Token. Wichtige Ressourcen sind `/products`, `/product-links`, `/suppliers`, `/alerts`, `/requisitions`, `/orders`, `/dashboard` und `/export/spend.csv`. Über `/products/:id/warehouse-link` werden bestehende Produkte verknüpft oder wieder getrennt. Admins prüfen mit `POST /orders/:id/adam-hall/cart` einen serverseitigen Live-Warenkorb und übertragen ihn mit `POST /orders/:id/adam-hall/order` verbindlich; zulässig sind ausschließlich Entwürfe eines eindeutig erkannten Adam-Hall-Lieferanten mit ganzzahligen Katalogpositionen. `POST /requisitions/:id/decision` erzwingt für MCP/KI die Version und generell einen anderen Entscheider als den Anforderer. `POST /orders/:id/receipt` sperrt Bestellung und Position, dokumentiert den Eingang und aktualisiert bei verknüpften Artikeln atomar Mengenbestand oder Devices sowie den Putaway-Task. `GET /health` und `GET /api/v1/branding` sind öffentlich.
 
 ## Datenhaltung
 
-ProcurementCore verwendet die gemeinsame PostgreSQL-Instanz. Die Tabellen werden beim Start idempotent migriert; die prüfbare SQL-Basis liegt unter `migrations/`. `core_product_links` hält die eindeutige Zuordnung zwischen den eigenständig gepflegten Produktstämmen. Stammdaten bleiben in ihrem jeweiligen Core; nur ein ausdrücklich verbuchter Wareneingang schreibt den zugeordneten Warehouse-Bestand in derselben Transaktion fort. Die Receipt-Felder `warehouse_product_id`, `warehouse_tracking_mode` und `warehouse_quantity_applied` sichern die Zuordnung für das Audit. Geldwerte werden überall als Integer-Cent gespeichert.
+ProcurementCore verwendet die gemeinsame PostgreSQL-Instanz. Die Tabellen werden beim Start idempotent migriert; die prüfbare SQL-Basis liegt unter `migrations/`. `core_product_links` hält die eindeutige Zuordnung zwischen den eigenständig gepflegten Produktstämmen. Stammdaten bleiben in ihrem jeweiligen Core; nur ein ausdrücklich verbuchter Wareneingang schreibt den zugeordneten Warehouse-Bestand in derselben Transaktion fort. Die Receipt-Felder `warehouse_product_id`, `warehouse_tracking_mode` und `warehouse_quantity_applied` sichern die Zuordnung für das Audit. `proc_idempotency_records` speichert ausschließlich Benutzer, Operation, gehashte Schlüssel/Payloads und die Replay-Antwort; der Klartextschlüssel wird nie persistiert. Geldwerte werden überall als Integer-Cent gespeichert.

@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"procurementcore/internal/models"
 )
@@ -66,6 +67,51 @@ func TestValidateWarehouseReceipt(t *testing.T) {
 				t.Fatalf("validateWarehouseReceipt() error = %#v, want status=%d code=%q", err, test.wantStatus, test.wantCode)
 			}
 		})
+	}
+}
+
+func TestValidateExpectedUpdate(t *testing.T) {
+	actual := time.Date(2026, 9, 22, 8, 15, 0, 123000000, time.UTC)
+	if err := validateExpectedUpdate(actual, nil, false); err != nil {
+		t.Fatalf("optional version failed: %v", err)
+	}
+	if err := validateExpectedUpdate(actual, nil, true); err == nil || err.status != http.StatusPreconditionRequired || err.code != "version_required" {
+		t.Fatalf("missing required version = %#v", err)
+	}
+	matching := actual
+	if err := validateExpectedUpdate(actual, &matching, true); err != nil {
+		t.Fatalf("matching version failed: %v", err)
+	}
+	stale := actual.Add(-time.Second)
+	if err := validateExpectedUpdate(actual, &stale, true); err == nil || err.status != http.StatusConflict || err.code != "stale_version" {
+		t.Fatalf("stale version = %#v", err)
+	}
+}
+
+func TestNormalizeReceiptSerials(t *testing.T) {
+	serials, err := normalizeReceiptSerials([]string{" SN-001 ", "SN-002"}, 2, true)
+	if err != nil || !reflect.DeepEqual(serials, []string{"SN-001", "SN-002"}) {
+		t.Fatalf("serials=%v err=%v", serials, err)
+	}
+	if _, err := normalizeReceiptSerials(nil, 2, true); err == nil || err.code != "serial_count_mismatch" {
+		t.Fatalf("missing serials error = %#v", err)
+	}
+	if _, err := normalizeReceiptSerials([]string{"SN-001", "sn-001"}, 2, true); err == nil || err.code != "serial_invalid" {
+		t.Fatalf("duplicate serial error = %#v", err)
+	}
+	if serials, err := normalizeReceiptSerials(nil, 2, false); err != nil || serials != nil {
+		t.Fatalf("legacy optional serials=%v err=%v", serials, err)
+	}
+}
+
+func TestIsMCPMutation(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "/", nil)
+	if isMCPMutation(request) {
+		t.Fatal("request without origin was classified as MCP")
+	}
+	request.Header.Set("X-Cores-Origin", "MCP/AI")
+	if !isMCPMutation(request) {
+		t.Fatal("MCP origin was not recognized")
 	}
 }
 

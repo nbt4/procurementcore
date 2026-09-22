@@ -1,8 +1,10 @@
 package api
 
 import (
+	"crypto/sha256"
 	"database/sql"
 	"encoding/csv"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +12,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -986,32 +989,59 @@ func (h *Handler) decideRequisition(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input struct {
-		Decision string `json:"decision"`
-		Note     string `json:"note"`
+		Decision          string     `json:"decision"`
+		Note              string     `json:"note"`
+		ExpectedUpdatedAt *time.Time `json:"expectedUpdatedAt"`
 	}
 	if !decode(w, r, &input) {
 		return
 	}
-	if input.Decision != "approved" && input.Decision != "rejected" {
-		badRequest(w, "Entscheidung muss approved oder rejected sein")
+	if input.Decision != "approved" && input.Decision != "rejected" && input.Decision != "returned" {
+		badRequest(w, "Entscheidung muss approved, rejected oder returned sein")
 		return
 	}
+	if input.Decision == "returned" && strings.TrimSpace(input.Note) == "" {
+		badRequest(w, "Für die Rückgabe ist eine Begründung erforderlich")
+		return
+	}
+	user := auth.CurrentUser(r)
 	var row models.Requisition
-	if err := h.db.First(&row, id).Error; err != nil {
-		notFound(w)
+	replayed := false
+	err := h.db.Transaction(func(tx *gorm.DB) error {
+		idempotency, replay, err := beginIdempotentMutation(tx, r, "requisition_decision", map[string]any{"id": id, "input": input})
+		if err != nil {
+			return err
+		}
+		if replay != nil {
+			replayed = true
+			return json.Unmarshal(replay, &row)
+		}
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&row, id).Error; err != nil {
+			return err
+		}
+		if row.Status != "submitted" {
+			return &receiptFlowError{status: http.StatusConflict, code: "requisition_not_submitted", message: "Bedarf ist nicht zur Entscheidung eingereicht"}
+		}
+		if row.RequesterID == user.ID {
+			return &receiptFlowError{status: http.StatusForbidden, code: "separation_of_duties", message: "Anfordernde dürfen den eigenen Bedarf nicht freigeben oder ablehnen"}
+		}
+		if versionErr := validateExpectedUpdate(row.UpdatedAt, input.ExpectedUpdatedAt, isMCPMutation(r)); versionErr != nil {
+			return versionErr
+		}
+		now := time.Now()
+		row.Status, row.ApprovedBy, row.ApprovedByName, row.DecisionNote, row.DecidedAt = input.Decision, &user.ID, user.Username, strings.TrimSpace(input.Note), &now
+		if err := tx.Save(&row).Error; err != nil {
+			return err
+		}
+		return completeIdempotentMutation(tx, idempotency, http.StatusOK, row)
+	})
+	if err != nil {
+		writeProcurementFlowError(w, err)
 		return
 	}
-	if row.Status != "submitted" {
-		badRequest(w, "Bedarf ist nicht zur Entscheidung eingereicht")
-		return
+	if !replayed {
+		h.activity(r, "requisition", id, input.Decision, fmt.Sprintf("from=submitted to=%s number=%s", input.Decision, row.Number))
 	}
-	user, now := auth.CurrentUser(r), time.Now()
-	row.Status, row.ApprovedBy, row.ApprovedByName, row.DecisionNote, row.DecidedAt = input.Decision, &user.ID, user.Username, input.Note, &now
-	if err := h.db.Save(&row).Error; err != nil {
-		serverError(w, err)
-		return
-	}
-	h.activity(r, "requisition", id, input.Decision, row.Number)
 	writeJSON(w, http.StatusOK, row)
 }
 
@@ -1372,6 +1402,85 @@ type receiptFlowError struct {
 
 func (err *receiptFlowError) Error() string { return err.message }
 
+func isMCPMutation(r *http.Request) bool {
+	return strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Cores-Origin")), "MCP/AI")
+}
+
+func validateExpectedUpdate(actual time.Time, expected *time.Time, required bool) *receiptFlowError {
+	if expected == nil {
+		if required {
+			return &receiptFlowError{status: http.StatusPreconditionRequired, code: "version_required", message: "expectedUpdatedAt ist für MCP/KI-Änderungen erforderlich"}
+		}
+		return nil
+	}
+	if !actual.Equal(*expected) {
+		return &receiptFlowError{status: http.StatusConflict, code: "stale_version", message: "Datensatz wurde zwischen Vorschau und Ausführung geändert"}
+	}
+	return nil
+}
+
+func writeProcurementFlowError(w http.ResponseWriter, err error) {
+	var flowErr *receiptFlowError
+	if errors.As(err, &flowErr) {
+		writeJSON(w, flowErr.status, map[string]string{"error": flowErr.message, "code": flowErr.code})
+		return
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		notFound(w)
+		return
+	}
+	serverError(w, err)
+}
+
+var validIdempotencyKey = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$`)
+
+func beginIdempotentMutation(tx *gorm.DB, r *http.Request, operation string, input any) (*models.IdempotencyRecord, json.RawMessage, error) {
+	if !isMCPMutation(r) {
+		return nil, nil, nil
+	}
+	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if !validIdempotencyKey.MatchString(key) {
+		return nil, nil, &receiptFlowError{status: http.StatusPreconditionRequired, code: "idempotency_key_required", message: "Ein gültiger Idempotency-Key ist für MCP/KI-Änderungen erforderlich"}
+	}
+	payload, err := json.Marshal(input)
+	if err != nil {
+		return nil, nil, err
+	}
+	keyDigest := sha256.Sum256([]byte(key))
+	requestDigest := sha256.Sum256(payload)
+	user := auth.CurrentUser(r)
+	record := models.IdempotencyRecord{
+		UserID: user.ID, Operation: operation, KeyHash: hex.EncodeToString(keyDigest[:]),
+		RequestHash: hex.EncodeToString(requestDigest[:]), Response: json.RawMessage(`{}`), StatusCode: http.StatusOK,
+	}
+	result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&record)
+	if result.Error != nil {
+		return nil, nil, result.Error
+	}
+	if result.RowsAffected == 1 {
+		return &record, nil, nil
+	}
+	var existing models.IdempotencyRecord
+	if err := tx.Where("user_id = ? AND operation = ? AND key_hash = ?", user.ID, operation, record.KeyHash).First(&existing).Error; err != nil {
+		return nil, nil, err
+	}
+	if existing.RequestHash != record.RequestHash {
+		return nil, nil, &receiptFlowError{status: http.StatusConflict, code: "idempotency_payload_conflict", message: "Der Idempotency-Key wurde bereits mit einer anderen Payload verwendet"}
+	}
+	return &existing, existing.Response, nil
+}
+
+func completeIdempotentMutation(tx *gorm.DB, record *models.IdempotencyRecord, status int, response any) error {
+	if record == nil {
+		return nil
+	}
+	payload, err := json.Marshal(response)
+	if err != nil {
+		return err
+	}
+	return tx.Model(record).Updates(map[string]any{"response": json.RawMessage(payload), "status_code": status}).Error
+}
+
 func validateWarehouseReceipt(trackingMode string, quantity float64) *receiptFlowError {
 	switch trackingMode {
 	case "quantity", "none":
@@ -1386,15 +1495,40 @@ func validateWarehouseReceipt(trackingMode string, quantity float64) *receiptFlo
 	}
 }
 
+func normalizeReceiptSerials(values []string, quantity int, required bool) ([]string, *receiptFlowError) {
+	if len(values) == 0 && !required {
+		return nil, nil
+	}
+	if quantity <= 0 || len(values) != quantity {
+		return nil, &receiptFlowError{status: http.StatusBadRequest, code: "serial_count_mismatch", message: "Für jedes einzeln verfolgte Gerät ist genau eine Seriennummer erforderlich"}
+	}
+	result := make([]string, 0, len(values))
+	seen := make(map[string]bool, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		key := strings.ToLower(value)
+		if value == "" || seen[key] {
+			return nil, &receiptFlowError{status: http.StatusBadRequest, code: "serial_invalid", message: "Seriennummern dürfen nicht leer oder doppelt sein"}
+		}
+		seen[key] = true
+		result = append(result, value)
+	}
+	return result, nil
+}
+
 func (h *Handler) receiveOrder(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
 		return
 	}
 	var input struct {
-		LineID   uint    `json:"lineId"`
-		Quantity float64 `json:"quantity"`
-		Note     string  `json:"note"`
+		LineID            uint       `json:"lineId"`
+		Quantity          float64    `json:"quantity"`
+		Note              string     `json:"note"`
+		ExpectedUpdatedAt *time.Time `json:"expectedUpdatedAt"`
+		SerialNumbers     []string   `json:"serialNumbers"`
+		TargetZoneID      *int64     `json:"targetZoneId"`
+		AllowOverdelivery bool       `json:"allowOverdelivery"`
 	}
 	if !decode(w, r, &input) {
 		return
@@ -1405,12 +1539,31 @@ func (h *Handler) receiveOrder(w http.ResponseWriter, r *http.Request) {
 	}
 	user := auth.CurrentUser(r)
 	var line models.PurchaseOrderLine
+	var order models.PurchaseOrder
+	replayed := false
 	receipt := models.Receipt{PurchaseOrderID: id, PurchaseOrderLineID: input.LineID, Quantity: input.Quantity, ReceivedBy: user.ID, ReceivedByName: user.Username, Note: input.Note, ReceivedAt: time.Now()}
 	err := h.db.Transaction(func(tx *gorm.DB) error {
+		idempotency, replay, err := beginIdempotentMutation(tx, r, "purchase_order_receipt", map[string]any{"id": id, "input": input})
+		if err != nil {
+			return err
+		}
+		if replay != nil {
+			replayed = true
+			return json.Unmarshal(replay, &receipt)
+		}
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&order, id).Error; err != nil {
+			return err
+		}
+		if order.Status != "sent" && order.Status != "confirmed" && order.Status != "partially_received" {
+			return &receiptFlowError{status: http.StatusConflict, code: "order_not_receivable", message: "Wareneingang ist nur für versendete oder bestätigte Bestellungen zulässig"}
+		}
+		if versionErr := validateExpectedUpdate(order.UpdatedAt, input.ExpectedUpdatedAt, isMCPMutation(r)); versionErr != nil {
+			return versionErr
+		}
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND purchase_order_id = ?", input.LineID, id).First(&line).Error; err != nil {
 			return err
 		}
-		if line.ReceivedQuantity+input.Quantity > line.Quantity {
+		if line.ReceivedQuantity+input.Quantity > line.Quantity && !input.AllowOverdelivery {
 			return &receiptFlowError{status: http.StatusBadRequest, code: "ordered_quantity_exceeded", message: "Wareneingang überschreitet Bestellmenge"}
 		}
 		if line.ProductID != nil {
@@ -1432,16 +1585,33 @@ func (h *Handler) receiveOrder(w http.ResponseWriter, r *http.Request) {
 			if validationErr := validateWarehouseReceipt(trackingMode, input.Quantity); validationErr != nil {
 				return validationErr
 			}
+			var targetZone any
+			if input.TargetZoneID != nil {
+				var zone struct {
+					ID                int64
+					Code              string
+					IsActive          bool
+					IsStorable        bool
+					OperationalStatus string
+				}
+				if err := tx.Raw(`SELECT zone_id AS id,code,is_active,is_storable,operational_status FROM storage_zones WHERE zone_id=? FOR UPDATE`, *input.TargetZoneID).Scan(&zone).Error; err != nil {
+					return err
+				}
+				if zone.ID == 0 || !zone.IsActive || !zone.IsStorable || zone.OperationalStatus != "available" {
+					return &receiptFlowError{status: http.StatusConflict, code: "target_zone_unavailable", message: "Der Ziel-Lagerplatz ist nicht aktiv, verfügbar und einlagerungsfähig"}
+				}
+				targetZone = zone.ID
+			}
 			receipt.WarehouseProductID = &warehouseProductID
 			receipt.WarehouseTrackingMode = trackingMode
 			switch trackingMode {
 			case "quantity":
 				if err := tx.Exec(`
 					INSERT INTO product_locations(product_id,zone_id,quantity,updated_at)
-					VALUES(?,NULL,?,CURRENT_TIMESTAMP)
+					VALUES(?,?,?,CURRENT_TIMESTAMP)
 					ON CONFLICT(product_id,zone_id) DO UPDATE
 					SET quantity=product_locations.quantity+EXCLUDED.quantity,updated_at=CURRENT_TIMESTAMP
-				`, warehouseProductID, input.Quantity).Error; err != nil {
+				`, warehouseProductID, targetZone, input.Quantity).Error; err != nil {
 					return err
 				}
 				receipt.WarehouseQuantityApplied = input.Quantity
@@ -1449,18 +1619,34 @@ func (h *Handler) receiveOrder(w http.ResponseWriter, r *http.Request) {
 					return err
 				}
 			case "individual":
-				if err := tx.Exec(`
-					INSERT INTO devices(productID,status,condition_status,current_location)
-					SELECT ?,'location_unknown','available','location_unknown'
-					FROM generate_series(1,CAST(? AS BIGINT))
-				`, warehouseProductID, int64(input.Quantity)).Error; err != nil {
-					return err
+				serials, validationErr := normalizeReceiptSerials(input.SerialNumbers, int(input.Quantity), isMCPMutation(r))
+				if validationErr != nil {
+					return validationErr
+				}
+				for index := 0; index < int(input.Quantity); index++ {
+					var deviceID string
+					var serial any
+					if index < len(serials) {
+						serial = serials[index]
+						if err := lockAndValidateReceiptSerial(tx, serials[index]); err != nil {
+							return err
+						}
+					}
+					if err := tx.Raw(`INSERT INTO devices(productID,serialnumber,status,condition_status,current_location) VALUES(?,?,'location_unknown','available','location_unknown') RETURNING deviceID`, warehouseProductID, serial).Scan(&deviceID).Error; err != nil {
+						return err
+					}
+					receipt.CreatedDeviceIDs = append(receipt.CreatedDeviceIDs, deviceID)
 				}
 				receipt.WarehouseQuantityApplied = input.Quantity
 				if err := tx.Raw("SELECT COUNT(*) FROM devices WHERE productID=?", warehouseProductID).Scan(&receipt.WarehouseDeviceCountAfter).Error; err != nil {
 					return err
 				}
 			}
+			var putawayTaskID int64
+			if err := tx.Raw(`INSERT INTO warehouse_tasks(task_type,status,priority,to_zone_id,product_id,quantity,notes) VALUES('putaway','open',70,?,?,?,?) RETURNING task_id`, input.TargetZoneID, warehouseProductID, input.Quantity, fmt.Sprintf("Wareneingang Bestellung %d Position %d", id, line.ID)).Scan(&putawayTaskID).Error; err != nil {
+				return err
+			}
+			receipt.PutawayTaskID = &putawayTaskID
 		}
 		receipt.PurchaseOrderLineID = line.ID
 		line.ReceivedQuantity += input.Quantity
@@ -1476,27 +1662,43 @@ func (h *Handler) receiveOrder(w http.ResponseWriter, r *http.Request) {
 		if remaining > 0 {
 			status = "partially_received"
 		}
-		return tx.Model(&models.PurchaseOrder{}).Where("id = ?", id).Update("status", status).Error
+		if err := tx.Model(&order).Update("status", status).Error; err != nil {
+			return err
+		}
+		return completeIdempotentMutation(tx, idempotency, http.StatusCreated, receipt)
 	})
 	if err != nil {
-		var flowErr *receiptFlowError
-		if errors.As(err, &flowErr) {
-			writeJSON(w, flowErr.status, map[string]string{"error": flowErr.message, "code": flowErr.code})
-			return
-		}
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			notFound(w)
-			return
-		}
-		serverError(w, err)
+		writeProcurementFlowError(w, err)
 		return
 	}
 	details := fmt.Sprintf("line=%d quantity=%g", line.ID, input.Quantity)
+	if input.AllowOverdelivery && line.ReceivedQuantity > line.Quantity {
+		details += fmt.Sprintf(" overdelivery=%g", line.ReceivedQuantity-line.Quantity)
+	}
 	if receipt.WarehouseProductID != nil {
 		details += fmt.Sprintf(" warehouse_product=%d tracking=%s applied=%g", *receipt.WarehouseProductID, receipt.WarehouseTrackingMode, receipt.WarehouseQuantityApplied)
 	}
-	h.activity(r, "purchase_order", id, "goods_received", details)
+	if receipt.PutawayTaskID != nil {
+		details += fmt.Sprintf(" putaway_task=%d devices_created=%d", *receipt.PutawayTaskID, len(receipt.CreatedDeviceIDs))
+	}
+	if !replayed {
+		h.activity(r, "purchase_order", id, "goods_received", details)
+	}
 	writeJSON(w, http.StatusCreated, receipt)
+}
+
+func lockAndValidateReceiptSerial(tx *gorm.DB, serial string) error {
+	if err := tx.Exec(`SELECT pg_advisory_xact_lock(hashtextextended(LOWER(?),0))`, serial).Error; err != nil {
+		return err
+	}
+	var exists bool
+	if err := tx.Raw(`SELECT EXISTS(SELECT 1 FROM devices WHERE LOWER(TRIM(serialnumber))=LOWER(?))`, serial).Scan(&exists).Error; err != nil {
+		return err
+	}
+	if exists {
+		return &receiptFlowError{status: http.StatusConflict, code: "device_serial_conflict", message: "Eine Seriennummer ist bereits vorhanden"}
+	}
+	return nil
 }
 
 func (h *Handler) listActivity(w http.ResponseWriter, r *http.Request) {
@@ -1534,6 +1736,11 @@ func (h *Handler) exportSpend(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) activity(r *http.Request, entity string, id uint, action, details string) {
 	user := auth.CurrentUser(r)
+	origin := "UI"
+	if isMCPMutation(r) {
+		origin = "MCP/AI"
+	}
+	details = strings.TrimSpace("origin=" + origin + " " + details)
 	_ = h.db.Create(&models.Activity{EntityType: entity, EntityID: id, Action: action, UserID: user.ID, Username: user.Username, Details: details}).Error
 }
 
