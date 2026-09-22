@@ -1,5 +1,12 @@
 # ProcurementCore
 
+## Vollständige Dashboard-Lokalisierung (1.0.39)
+
+Die gemeinsame Sprachlogik verarbeitet deutsche und englische Quelltexte nun
+bidirektional und ersetzt dynamische Platzhalter. Einkaufskennzahlen,
+Prioritäten, Schnellaktionen und Beschaffungsablauf erscheinen damit
+vollständig in der gewählten Suite-Sprache.
+
 ## Abgesicherte MCP-Freigaben und Wareneingänge (1.0.38)
 
 ProcurementCore unterstützt jetzt die eng begrenzten MCP-Lifecycle-Prozesse aus
