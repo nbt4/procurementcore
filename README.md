@@ -1,5 +1,12 @@
 # ProcurementCore
 
+## Gemeinsames Datentransfer-Vokabular (1.0.40)
+
+Die synchronisierten Deutsch-/Englisch-Ressourcen enthalten jetzt auch die
+suiteweit verwendeten Datensatz-, Feld-, Vorschau- und Konfliktbegriffe des
+zentralen Import-/Export-Arbeitsbereichs. Fachliche Nutzdaten und technische
+Spaltenschlüssel bleiben dabei unverändert.
+
 ## Vollständige Dashboard-Lokalisierung (1.0.39)
 
 Die gemeinsame Sprachlogik verarbeitet deutsche und englische Quelltexte nun

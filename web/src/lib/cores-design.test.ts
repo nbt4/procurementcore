@@ -76,9 +76,15 @@ describe('suite i18n', () => {
     expect(suiteTranslate('Deine Aufgaben, Termine und Pläne auf einen Blick.')).toBe('Your tasks, dates, and plans at a glance.');
     expect(suiteTranslate('Bedarfe, Bezugsquellen und Bestellungen auf einem Stand.')).toBe('Requisitions, sources, and orders in one place.');
     expect(suiteTranslate('6 von 8 Komponenten online')).toBe('6 of 8 components online');
+    expect(suiteTranslate('Daten importieren und exportieren')).toBe('Import and export data');
+    expect(suiteTranslate('2 von 30 ausgewählt')).toBe('2 of 30 selected');
+    expect(suiteTranslate('3 erstellt, 2 aktualisiert, 1 übersprungen')).toBe('3 created, 2 updated, 1 skipped');
+    expect(suiteTranslate('Aktuell: Alt')).toBe('Current: Alt');
 
     setSuiteLanguage('de');
     expect(suiteTranslate('Contacts')).toBe('Kontakte');
     expect(suiteTranslate('6 of 8 components online')).toBe('6 von 8 Komponenten online');
+    expect(suiteTranslate('Import and export data')).toBe('Daten importieren und exportieren');
+    expect(suiteTranslate('3 created, 2 updated, 1 skipped')).toBe('3 erstellt, 2 aktualisiert, 1 übersprungen');
   });
 });
