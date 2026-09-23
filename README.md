@@ -1,5 +1,7 @@
 # ProcurementCore
 
+Release `1.0.43` korrigiert die Versionsangabe des Health-Endpunkts.
+
 ## Produktlinks mit gemeinsamer Jev-Auswahl (1.0.42)
 
 Der Linkimport sammelt Produktkandidaten aus JSON-LD und schema.org-Microdata
