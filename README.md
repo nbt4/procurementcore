@@ -1,5 +1,11 @@
 # ProcurementCore
 
+## Gemeinsames Etikettenbogen-Vokabular (1.0.41)
+
+Die suiteweiten Deutsch-/Englisch-Ressourcen enthalten jetzt auch A4-
+Etikettenbögen, Papieroptionen, individuelle Stückzahlen und dynamische
+Druckmeldungen des WarehouseCore-Druckcenters.
+
 ## Gemeinsames Datentransfer-Vokabular (1.0.40)
 
 Die synchronisierten Deutsch-/Englisch-Ressourcen enthalten jetzt auch die

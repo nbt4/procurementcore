@@ -80,11 +80,16 @@ describe('suite i18n', () => {
     expect(suiteTranslate('2 von 30 ausgewählt')).toBe('2 of 30 selected');
     expect(suiteTranslate('3 erstellt, 2 aktualisiert, 1 übersprungen')).toBe('3 created, 2 updated, 1 skipped');
     expect(suiteTranslate('Aktuell: Alt')).toBe('Current: Alt');
+    expect(suiteTranslate('A4-Etikettenbogen')).toBe('A4 label sheet');
+    expect(suiteTranslate('DEV-0001 auswählen')).toBe('Select DEV-0001');
+    expect(suiteTranslate('PDF für 6 Labels wird erstellt …')).toBe('PDF for 6 labels is being created …');
 
     setSuiteLanguage('de');
     expect(suiteTranslate('Contacts')).toBe('Kontakte');
     expect(suiteTranslate('6 of 8 components online')).toBe('6 von 8 Komponenten online');
     expect(suiteTranslate('Import and export data')).toBe('Daten importieren und exportieren');
     expect(suiteTranslate('3 created, 2 updated, 1 skipped')).toBe('3 erstellt, 2 aktualisiert, 1 übersprungen');
+    expect(suiteTranslate('A4 label sheet')).toBe('A4-Etikettenbogen');
+    expect(suiteTranslate('At most 500 labels are allowed per request.')).toBe('Höchstens 500 Labels sind je Anfrage erlaubt.');
   });
 });
