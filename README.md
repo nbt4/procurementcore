@@ -1,5 +1,20 @@
 # ProcurementCore
 
+## Produktlinks mit gemeinsamer Jev-Auswahl (1.0.42)
+
+Der Linkimport sammelt Produktkandidaten aus JSON-LD und schema.org-Microdata
+shopübergreifend. Wenn die Seite widersprüchliche Produkte nennt, kann Jev über
+OpenRouter anhand von Seitentitel, sichtbarer Überschrift, URL-Pfad und begrenzten
+Kandidatenmerkmalen das Hauptprodukt auswählen. Einfache HTML-Seiten verwenden
+zusätzlich ihre sichtbare H1-Überschrift. Die vorhandenen Shop-Adapter bleiben
+für technische Merkmale und verlässliche Preisquellen erhalten. Bei geringer
+Konfidenz oder einem API-Fehler bleibt die lokale Vorschau unverändert. Wird
+eine andere Produktidentität gewählt, bleibt der Preis bis zur Prüfung leer;
+Jev erhält weder die vollständige Seite noch Preisfelder oder URL-Parameter.
+HTTP/2 erlaubt auch den direkten Abruf der Huss-Produktseiten. Gesperrte oder
+nur per JavaScript gerenderte Produktseiten können weiterhin eine
+eingeschränkte Vorschau liefern.
+
 ## Gemeinsames Etikettenbogen-Vokabular (1.0.41)
 
 Die suiteweiten Deutsch-/Englisch-Ressourcen enthalten jetzt auch A4-
@@ -19,7 +34,6 @@ Die gemeinsame Sprachlogik verarbeitet deutsche und englische Quelltexte nun
 bidirektional und ersetzt dynamische Platzhalter. Einkaufskennzahlen,
 Prioritäten, Schnellaktionen und Beschaffungsablauf erscheinen damit
 vollständig in der gewählten Suite-Sprache.
-
 ## Abgesicherte MCP-Freigaben und Wareneingänge (1.0.38)
 
 ProcurementCore unterstützt jetzt die eng begrenzten MCP-Lifecycle-Prozesse aus
@@ -173,7 +187,8 @@ go run ./cmd/server
 
 Der Service läuft standardmäßig auf Port `8084`. `CORES_JWT_SECRET` und die PostgreSQL-Zugangsdaten müssen denen des Cores-Stacks entsprechen. `WAREHOUSECORE_PUBLIC_URL` steuert die serviceübergreifenden Links zum Warehouse-Produktstamm.
 
-Jev ist optional. `OPENROUTER_API_KEY` aktiviert die Entscheidungsschicht;
+Jev ist optional. `OPENROUTER_API_KEY` aktiviert die Entscheidungsschicht auch
+für den Produktlinkimport;
 `JEV_MODEL` ist standardmäßig `typesafe/jev-1.13`, `JEV_TIMEOUT` auf `3s` und
 `JEV_MIN_CONFIDENCE` auf `0.70` gesetzt. `JEV_ENABLED=false` deaktiviert sie
 explizit. Der Key gehört ausschließlich in die Laufzeitumgebung oder einen

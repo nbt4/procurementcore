@@ -24,6 +24,8 @@ import (
 	"sync"
 	"time"
 
+	"procurementcore/internal/jev"
+
 	xhtml "golang.org/x/net/html"
 	xcharset "golang.org/x/net/html/charset"
 )
@@ -57,6 +59,7 @@ type ProductPreview struct {
 
 type Fetcher struct {
 	client             *http.Client
+	jev                *jev.Client
 	resolver           *net.Resolver
 	adamHallClient     *http.Client
 	adamHallBaseURL    string
@@ -79,6 +82,7 @@ func New(options Options) *Fetcher {
 	dialer := &net.Dialer{Timeout: 6 * time.Second, KeepAlive: 30 * time.Second}
 	fetcher := &Fetcher{
 		resolver:         resolver,
+		jev:              jev.FromEnv(),
 		adamHallBaseURL:  adamHallAPIBase,
 		adamHallUsername: options.AdamHallUsername,
 		adamHallPassword: options.AdamHallPassword,
@@ -98,6 +102,7 @@ func New(options Options) *Fetcher {
 		TLSHandshakeTimeout:   6 * time.Second,
 		ResponseHeaderTimeout: 8 * time.Second,
 		DisableCompression:    false,
+		ForceAttemptHTTP2:     true,
 	}
 	fetcher.client = &http.Client{
 		Transport: transport,
@@ -164,6 +169,7 @@ func (f *Fetcher) Scrape(ctx context.Context, rawURL string) (ProductPreview, er
 	if err != nil {
 		return ProductPreview{}, err
 	}
+	preview = f.enrichProductPreview(ctx, body, response.Request.URL, preview)
 	if isAdamHallHost(response.Request.URL.Hostname()) && f.adamHallUsername != "" && preview.SKU != "" {
 		price, err := f.adamHallPrice(ctx, preview.SKU)
 		if err != nil {
@@ -593,7 +599,7 @@ func ParseHTML(reader io.Reader, sourceURL *url.URL) (ProductPreview, error) {
 		return ProductPreview{}, errors.New("Produktseite enthält ungültiges HTML")
 	}
 	meta := map[string]string{}
-	var title string
+	var title, heading string
 	var scripts []string
 	var walk func(*xhtml.Node)
 	walk = func(node *xhtml.Node) {
@@ -615,6 +621,10 @@ func ParseHTML(reader io.Reader, sourceURL *url.URL) (ProductPreview, error) {
 			case "title":
 				if node.FirstChild != nil {
 					title = strings.TrimSpace(node.FirstChild.Data)
+				}
+			case "h1":
+				if heading == "" {
+					heading = nodeText(node)
 				}
 			case "script":
 				for _, attribute := range node.Attr {
@@ -648,7 +658,7 @@ func ParseHTML(reader io.Reader, sourceURL *url.URL) (ProductPreview, error) {
 		preview.Source = "schema.org Microdata"
 	}
 	if preview.Name == "" {
-		preview.Name = first(meta["og:title"], meta["twitter:title"], title)
+		preview.Name = first(meta["og:title"], meta["twitter:title"], heading, title)
 	}
 	if preview.Description == "" {
 		preview.Description = first(meta["og:description"], meta["description"], meta["twitter:description"])
