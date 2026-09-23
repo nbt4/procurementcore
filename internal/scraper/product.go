@@ -676,6 +676,9 @@ func ParseHTML(reader io.Reader, sourceURL *url.URL) (ProductPreview, error) {
 		applyAdamHallPage(&preview, document)
 	}
 	applyShopPage(&preview, document, sourceURL)
+	if applyGenericSpecs(&preview, document) > 0 && preview.Source == "JSON-LD" {
+		preview.Source = "JSON-LD + HTML specs"
+	}
 	if preview.Source == "" && preview.Name != "" {
 		preview.Source = "OpenGraph/HTML"
 	}

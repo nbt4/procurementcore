@@ -19,7 +19,7 @@ func TestJevSelectsMainProductFromConflictingPageEvidence(t *testing.T) {
 	<script type="application/ld+json">{"@graph":[
 	{"@type":"Product","name":"Replacement Case","sku":"CASE-1","offers":{"price":"9.90"}},
 	{"@type":"Product","name":"Main Product","sku":"MAIN-2","brand":{"name":"Maker"},"offers":{"price":"49.90"}}
-	]}</script></head><body><h1>Main Product</h1></body></html>`
+	]}</script></head><body><h1>Main Product</h1><ul class="technical-specifications"><li><strong>Power:</strong> 500 W</li></ul></body></html>`
 	source, _ := url.Parse("https://shop.example/products/main-product?tracking=secret")
 	fallback, err := ParseHTML(strings.NewReader(page), source)
 	if err != nil {
@@ -85,7 +85,7 @@ func TestJevSelectsMainProductFromConflictingPageEvidence(t *testing.T) {
 			if preview.SKU != test.wantSKU {
 				t.Fatalf("SKU = %q, want %q; preview: %+v", preview.SKU, test.wantSKU, preview)
 			}
-			if test.wantSKU == "MAIN-2" && (preview.PriceCents != 0 || preview.Manufacturer != "Maker" || preview.Source != "JSON-LD + Jev") {
+			if test.wantSKU == "MAIN-2" && (preview.PriceCents != 0 || preview.Manufacturer != "Maker" || preview.Source != "JSON-LD + Jev + HTML specs" || preview.Attributes["Power"] != "500 W") {
 				t.Fatalf("Jev selection changed product evidence: %+v", preview)
 			}
 		})

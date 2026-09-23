@@ -1,6 +1,15 @@
 # ProcurementCore
 
-Release `1.0.43` korrigiert die Versionsangabe des Health-Endpunkts.
+Release `1.0.44` liest technische Produktangaben aus üblichen HTML-Mustern
+shopübergreifend aus und speichert sie beim Linkimport als Attribute. Tabellen,
+Definitionslisten sowie beschriftete Listen und Felder werden berücksichtigt.
+JSON-LD und vorhandene Shop-Adapter behalten Vorrang, wenn derselbe Wert bereits
+strukturiert vorliegt. Auf der Claypaky-Seite „Tambora Rays“ werden damit unter
+anderem Lichtquelle, CRI, DMX/Netzwerkprotokolle, Leistungsaufnahme, Maße und
+Gewicht übernommen. Jev wählt weiterhin bei widersprüchlichen Produktkandidaten
+das Hauptprodukt; die Jev-Entscheidungs-API liefert selbst keine freien
+Attributtexte. Dynamisch erst im Browser geladene oder nur in PDFs enthaltene
+Angaben können ohne zusätzliche Datenquelle fehlen.
 
 ## Produktlinks mit gemeinsamer Jev-Auswahl (1.0.42)
 

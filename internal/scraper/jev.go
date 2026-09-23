@@ -124,6 +124,13 @@ func (f *Fetcher) enrichProductPreview(ctx context.Context, body []byte, sourceU
 		return fallback
 	}
 	selected := candidates[index]
+	// Visible specifications belong to the selected page product, regardless of
+	// whether its identity came from JSON-LD, microdata, or the heading.
+	if heading != "" && productNameOverlap(selected.Name, heading) > 0 {
+		if applyGenericSpecs(&selected, document) > 0 {
+			selected.Source += " + HTML specs"
+		}
+	}
 	// A product decision must never select or transfer a price from a different
 	// structured record. The existing parser remains the price authority.
 	if sameProductIdentity(fallback, selected) {
