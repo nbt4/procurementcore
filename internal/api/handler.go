@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -339,19 +340,73 @@ func validateSupplier(row *models.Supplier) string {
 }
 
 func (h *Handler) createSupplier(w http.ResponseWriter, r *http.Request) {
-	var row models.Supplier
-	if !decode(w, r, &row) {
+	var input struct {
+		models.Supplier
+		Active *bool `json:"active"`
+	}
+	if !decode(w, r, &input) {
 		return
 	}
+	row := input.Supplier
+	row.Active = input.Active == nil || *input.Active
 	if msg := validateSupplier(&row); msg != "" {
 		badRequest(w, msg)
 		return
 	}
-	if err := h.db.Create(&row).Error; err != nil {
-		conflictOrServer(w, err)
+	user := auth.CurrentUser(r)
+	ipAddress := r.RemoteAddr
+	if host, _, err := net.SplitHostPort(ipAddress); err == nil {
+		ipAddress = host
+	}
+	if len(ipAddress) > 45 {
+		ipAddress = ipAddress[:45]
+	}
+	err := h.db.Transaction(func(tx *gorm.DB) error {
+		idempotency, replay, err := beginIdempotentMutation(tx, r, "supplier_create", row)
+		if err != nil {
+			return err
+		}
+		if replay != nil {
+			return json.Unmarshal(replay, &row)
+		}
+		requestedActive := row.Active
+		if err := tx.Create(&row).Error; err != nil {
+			return err
+		}
+		// GORM applies the model's default:true to a zero bool during Create.
+		// Preserve an explicitly inactive supplier in the persisted record.
+		if !requestedActive {
+			if err := tx.Model(&row).UpdateColumn("active", false).Error; err != nil {
+				return err
+			}
+			row.Active = false
+		}
+		origin := "UI"
+		if isMCPMutation(r) {
+			origin = "MCP/AI"
+		}
+		changes, err := json.Marshal(map[string]any{"origin": origin, "after": row})
+		if err != nil {
+			return err
+		}
+		if err := tx.Exec(`INSERT INTO audit_log (user_id,action,entity_type,entity_id,old_values,new_values,ip_address,user_agent)
+			VALUES (?, 'supplier.create', 'procurement_supplier', ?, NULL, ?::jsonb, ?, ?)`, user.ID, strconv.FormatUint(uint64(row.ID), 10), string(changes), ipAddress, r.UserAgent()).Error; err != nil {
+			return err
+		}
+		if err := tx.Create(&models.Activity{EntityType: "supplier", EntityID: row.ID, Action: "created", UserID: user.ID, Username: user.Username, Details: "origin=" + origin + " " + row.Name}).Error; err != nil {
+			return err
+		}
+		return completeIdempotentMutation(tx, idempotency, http.StatusCreated, row)
+	})
+	if err != nil {
+		var flowErr *receiptFlowError
+		if errors.As(err, &flowErr) {
+			writeProcurementFlowError(w, err)
+		} else {
+			conflictOrServer(w, err)
+		}
 		return
 	}
-	h.activity(r, "supplier", row.ID, "created", row.Name)
 	writeJSON(w, http.StatusCreated, row)
 }
 

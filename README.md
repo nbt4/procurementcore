@@ -1,5 +1,13 @@
 # ProcurementCore
 
+Release `1.0.45` speichert die Anlage von Lieferanten zusammen mit Aktivität,
+Audit-Herkunft (`UI` oder `MCP/AI`) und bei MCP-Aufrufen dem dauerhaft
+gespeicherten Idempotenz-Ergebnis in einer Transaktion. Ein fehlgeschlagener
+Audit-Eintrag rollt die Anlage zurück. `active=false` bleibt bei der Anlage
+erhalten; ohne Angabe bleibt der Lieferant standardmäßig aktiv.
+Der isolierte PostgreSQL-Test läuft mit
+`PROCUREMENT_TEST_DATABASE_URL=postgres://.../cores_supplier_test go test ./internal/api`.
+
 Release `1.0.44` liest technische Produktangaben aus üblichen HTML-Mustern
 shopübergreifend aus und speichert sie beim Linkimport als Attribute. Tabellen,
 Definitionslisten sowie beschriftete Listen und Felder werden berücksichtigt.
