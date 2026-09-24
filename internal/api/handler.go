@@ -233,25 +233,54 @@ func (h *Handler) listCategories(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) createCategory(w http.ResponseWriter, r *http.Request) {
 	var row models.Category
-	if !decode(w, r, &row) || strings.TrimSpace(row.Name) == "" {
-		if row.Name == "" {
-			badRequest(w, "Name ist erforderlich")
+	if !decode(w, r, &row) {
+		return
+	}
+	if msg := validateCategory(&row); msg != "" {
+		badRequest(w, msg)
+		return
+	}
+	var created models.Category
+	err := h.db.Transaction(func(tx *gorm.DB) error {
+		idempotency, replay, err := beginIdempotentMutation(tx, r, "category_create", row)
+		if err != nil {
+			return err
+		}
+		if replay != nil {
+			return json.Unmarshal(replay, &created)
+		}
+		if err := tx.Create(&row).Error; err != nil {
+			return err
+		}
+		origin := "UI"
+		if isMCPMutation(r) {
+			origin = "MCP/AI"
+		}
+		changes, err := json.Marshal(map[string]any{"origin": origin, "after": row})
+		if err != nil {
+			return err
+		}
+		user := auth.CurrentUser(r)
+		if err := tx.Exec(`INSERT INTO audit_log (user_id,action,entity_type,entity_id,old_values,new_values,ip_address,user_agent)
+			VALUES (?, 'category.create', 'procurement_category', ?, NULL, ?::jsonb, ?, ?)`, user.ID, strconv.FormatUint(uint64(row.ID), 10), string(changes), requestIP(r), r.UserAgent()).Error; err != nil {
+			return err
+		}
+		if err := tx.Create(&models.Activity{EntityType: "category", EntityID: row.ID, Action: "created", UserID: user.ID, Username: user.Username, Details: "origin=" + origin + " " + row.Name}).Error; err != nil {
+			return err
+		}
+		created = row
+		return completeIdempotentMutation(tx, idempotency, http.StatusCreated, created)
+	})
+	if err != nil {
+		var flowErr *receiptFlowError
+		if errors.As(err, &flowErr) {
+			writeProcurementFlowError(w, err)
+		} else {
+			conflictOrServer(w, err)
 		}
 		return
 	}
-	if len(row.ParameterSchema) == 0 {
-		row.ParameterSchema = json.RawMessage("[]")
-	}
-	if !json.Valid(row.ParameterSchema) {
-		badRequest(w, "Parameter-Schema ist kein gültiges JSON")
-		return
-	}
-	if err := h.db.Create(&row).Error; err != nil {
-		conflictOrServer(w, err)
-		return
-	}
-	h.activity(r, "category", row.ID, "created", row.Name)
-	writeJSON(w, http.StatusCreated, row)
+	writeJSON(w, http.StatusCreated, created)
 }
 
 func (h *Handler) updateCategory(w http.ResponseWriter, r *http.Request) {
@@ -259,26 +288,125 @@ func (h *Handler) updateCategory(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var row models.Category
-	if err := h.db.First(&row, id).Error; err != nil {
-		notFound(w)
-		return
+	var input struct {
+		models.Category
+		ExpectedUpdatedAt *time.Time `json:"expectedUpdatedAt"`
 	}
-	var input models.Category
 	if !decode(w, r, &input) {
 		return
 	}
-	if strings.TrimSpace(input.Name) == "" || !json.Valid(input.ParameterSchema) {
-		badRequest(w, "Name und gültiges Parameter-Schema sind erforderlich")
+	if msg := validateCategory(&input.Category); msg != "" {
+		badRequest(w, msg)
 		return
 	}
-	row.Name, row.Description, row.ParameterSchema = input.Name, input.Description, input.ParameterSchema
-	if err := h.db.Save(&row).Error; err != nil {
-		conflictOrServer(w, err)
+	var updated models.Category
+	err := h.db.Transaction(func(tx *gorm.DB) error {
+		idempotency, replay, err := beginIdempotentMutation(tx, r, fmt.Sprintf("category_update:%d", id), input)
+		if err != nil {
+			return err
+		}
+		if replay != nil {
+			return json.Unmarshal(replay, &updated)
+		}
+		var previous models.Category
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&previous, id).Error; err != nil {
+			return err
+		}
+		if err := validateExpectedUpdate(previous.UpdatedAt, input.ExpectedUpdatedAt, isMCPMutation(r)); err != nil {
+			return err
+		}
+		updated = input.Category
+		updated.ID, updated.CreatedAt, updated.UpdatedAt = previous.ID, previous.CreatedAt, time.Time{}
+		if err := tx.Save(&updated).Error; err != nil {
+			return err
+		}
+		if err := tx.First(&updated, id).Error; err != nil {
+			return err
+		}
+		origin := "UI"
+		if isMCPMutation(r) {
+			origin = "MCP/AI"
+		}
+		beforeJSON, err := json.Marshal(previous)
+		if err != nil {
+			return err
+		}
+		changes, err := json.Marshal(map[string]any{"origin": origin, "before": previous, "after": updated})
+		if err != nil {
+			return err
+		}
+		user := auth.CurrentUser(r)
+		if err := tx.Exec(`INSERT INTO audit_log (user_id,action,entity_type,entity_id,old_values,new_values,ip_address,user_agent)
+			VALUES (?, 'category.update', 'procurement_category', ?, ?::jsonb, ?::jsonb, ?, ?)`, user.ID, strconv.FormatUint(uint64(id), 10), string(beforeJSON), string(changes), requestIP(r), r.UserAgent()).Error; err != nil {
+			return err
+		}
+		if err := tx.Create(&models.Activity{EntityType: "category", EntityID: id, Action: "updated", UserID: user.ID, Username: user.Username, Details: "origin=" + origin + " " + updated.Name}).Error; err != nil {
+			return err
+		}
+		return completeIdempotentMutation(tx, idempotency, http.StatusOK, updated)
+	})
+	if err != nil {
+		var flowErr *receiptFlowError
+		if errors.As(err, &flowErr) || errors.Is(err, gorm.ErrRecordNotFound) {
+			writeProcurementFlowError(w, err)
+		} else {
+			conflictOrServer(w, err)
+		}
 		return
 	}
-	h.activity(r, "category", row.ID, "updated", row.Name)
-	writeJSON(w, http.StatusOK, row)
+	writeJSON(w, http.StatusOK, updated)
+}
+
+func validateCategory(row *models.Category) string {
+	row.Name = strings.TrimSpace(row.Name)
+	if row.Name == "" || len([]rune(row.Name)) > 160 {
+		return "Kategoriename mit höchstens 160 Zeichen ist erforderlich"
+	}
+	if len(row.ParameterSchema) == 0 {
+		row.ParameterSchema = json.RawMessage("[]")
+	}
+	if len(row.ParameterSchema) > 65536 {
+		return "Parameter-Schema ist zu groß"
+	}
+	if !strings.HasPrefix(strings.TrimSpace(string(row.ParameterSchema)), "[") {
+		return "Parameter-Schema muss eine Liste sein"
+	}
+	var definitions []struct {
+		Key     string   `json:"key"`
+		Label   string   `json:"label"`
+		Type    string   `json:"type"`
+		Unit    string   `json:"unit"`
+		Options []string `json:"options"`
+	}
+	if err := json.Unmarshal(row.ParameterSchema, &definitions); err != nil || len(definitions) > 100 {
+		return "Parameter-Schema ist ungültig oder enthält mehr als 100 Felder"
+	}
+	seen := map[string]bool{}
+	for _, definition := range definitions {
+		key := strings.TrimSpace(definition.Key)
+		if key == "" || key != definition.Key || len([]rune(key)) > 80 || strings.TrimSpace(definition.Label) == "" || len([]rune(definition.Label)) > 160 {
+			return "Parameter benötigen einen eindeutigen Schlüssel und eine Beschriftung"
+		}
+		if seen[strings.ToLower(key)] {
+			return "Parameterschlüssel müssen eindeutig sein"
+		}
+		seen[strings.ToLower(key)] = true
+		if !map[string]bool{"text": true, "number": true, "select": true, "boolean": true}[definition.Type] || len([]rune(definition.Unit)) > 60 {
+			return "Ungültiger Parametertyp"
+		}
+		if len(definition.Options) > 100 {
+			return "Zu viele Auswahloptionen"
+		}
+		if definition.Type == "select" && len(definition.Options) == 0 {
+			return "Auswahlparameter benötigen Optionen"
+		}
+		for _, option := range definition.Options {
+			if strings.TrimSpace(option) == "" || len([]rune(option)) > 160 {
+				return "Auswahloptionen müssen 1 bis 160 Zeichen enthalten"
+			}
+		}
+	}
+	return ""
 }
 
 func (h *Handler) deleteCategory(w http.ResponseWriter, r *http.Request) {

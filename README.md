@@ -1,5 +1,13 @@
 # ProcurementCore
 
+Release `1.0.47` speichert Kategorien einschließlich vollständigem
+Parameter-Schema transaktional mit Aktivität und Audit-Herkunft. MCP/KI-Aufrufe
+benötigen einen Idempotenzschlüssel; Änderungen benötigen außerdem die exakte
+`expectedUpdatedAt`-Version. Die API gibt nach Änderungen die tatsächlich in
+PostgreSQL gespeicherte Version zurück. Ungültige und doppelte Parameterschlüssel
+werden abgewiesen. Der isolierte Integrationstest verwendet
+`PROCUREMENT_TEST_DATABASE_URL=postgres://.../cores_category_test go test ./internal/api`.
+
 Release `1.0.46` aktualisiert Lieferanten mit einer Sperre und einer für
 MCP/KI verpflichtenden `expectedUpdatedAt`-Versionsprüfung. Vorher-/Nachher-
 Werte, Aktivität, Audit-Herkunft und Idempotenz-Ergebnis werden atomar
