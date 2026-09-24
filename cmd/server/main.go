@@ -26,7 +26,7 @@ import (
 	"github.com/rs/zerolog"
 )
 
-const version = "1.0.45"
+const version = "1.0.46"
 
 const procurementMountPath = "/procurementcore"
 

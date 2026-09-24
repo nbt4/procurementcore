@@ -354,13 +354,6 @@ func (h *Handler) createSupplier(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user := auth.CurrentUser(r)
-	ipAddress := r.RemoteAddr
-	if host, _, err := net.SplitHostPort(ipAddress); err == nil {
-		ipAddress = host
-	}
-	if len(ipAddress) > 45 {
-		ipAddress = ipAddress[:45]
-	}
 	err := h.db.Transaction(func(tx *gorm.DB) error {
 		idempotency, replay, err := beginIdempotentMutation(tx, r, "supplier_create", row)
 		if err != nil {
@@ -390,7 +383,7 @@ func (h *Handler) createSupplier(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		if err := tx.Exec(`INSERT INTO audit_log (user_id,action,entity_type,entity_id,old_values,new_values,ip_address,user_agent)
-			VALUES (?, 'supplier.create', 'procurement_supplier', ?, NULL, ?::jsonb, ?, ?)`, user.ID, strconv.FormatUint(uint64(row.ID), 10), string(changes), ipAddress, r.UserAgent()).Error; err != nil {
+			VALUES (?, 'supplier.create', 'procurement_supplier', ?, NULL, ?::jsonb, ?, ?)`, user.ID, strconv.FormatUint(uint64(row.ID), 10), string(changes), requestIP(r), r.UserAgent()).Error; err != nil {
 			return err
 		}
 		if err := tx.Create(&models.Activity{EntityType: "supplier", EntityID: row.ID, Action: "created", UserID: user.ID, Username: user.Username, Details: "origin=" + origin + " " + row.Name}).Error; err != nil {
@@ -415,26 +408,86 @@ func (h *Handler) updateSupplier(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var row models.Supplier
-	if err := h.db.First(&row, id).Error; err != nil {
-		notFound(w)
-		return
+	var input struct {
+		models.Supplier
+		ExpectedUpdatedAt *time.Time `json:"expectedUpdatedAt"`
 	}
-	var input models.Supplier
 	if !decode(w, r, &input) {
 		return
 	}
-	if msg := validateSupplier(&input); msg != "" {
+	if msg := validateSupplier(&input.Supplier); msg != "" {
 		badRequest(w, msg)
 		return
 	}
-	input.ID, input.CreatedAt = row.ID, row.CreatedAt
-	if err := h.db.Save(&input).Error; err != nil {
-		conflictOrServer(w, err)
+	var updated models.Supplier
+	err := h.db.Transaction(func(tx *gorm.DB) error {
+		idempotency, replay, err := beginIdempotentMutation(tx, r, fmt.Sprintf("supplier_update:%d", id), input)
+		if err != nil {
+			return err
+		}
+		if replay != nil {
+			return json.Unmarshal(replay, &updated)
+		}
+		var previous models.Supplier
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&previous, id).Error; err != nil {
+			return err
+		}
+		if err := validateExpectedUpdate(previous.UpdatedAt, input.ExpectedUpdatedAt, isMCPMutation(r)); err != nil {
+			return err
+		}
+		updated = input.Supplier
+		updated.ID, updated.CreatedAt = previous.ID, previous.CreatedAt
+		updated.UpdatedAt = time.Time{}
+		if previous.Active && !updated.Active {
+			var openOrders int64
+			if err := tx.Model(&models.PurchaseOrder{}).Where("supplier_id = ? AND status NOT IN ?", id, []string{"cancelled", "received"}).Count(&openOrders).Error; err != nil {
+				return err
+			}
+			if openOrders > 0 {
+				return &receiptFlowError{status: http.StatusConflict, code: "supplier_open_orders", message: "Lieferant besitzt offene Bestellungen und kann noch nicht deaktiviert werden"}
+			}
+		}
+		if err := tx.Save(&updated).Error; err != nil {
+			return err
+		}
+		origin := "UI"
+		if isMCPMutation(r) {
+			origin = "MCP/AI"
+		}
+		beforeJSON, err := json.Marshal(previous)
+		if err != nil {
+			return err
+		}
+		changes, err := json.Marshal(map[string]any{"origin": origin, "before": previous, "after": updated})
+		if err != nil {
+			return err
+		}
+		auditAction, activityAction := "supplier.update", "updated"
+		if previous.Active && !updated.Active {
+			auditAction, activityAction = "supplier.deactivate", "deactivated"
+		} else if !previous.Active && updated.Active {
+			auditAction, activityAction = "supplier.reactivate", "reactivated"
+		}
+		user := auth.CurrentUser(r)
+		if err := tx.Exec(`INSERT INTO audit_log (user_id,action,entity_type,entity_id,old_values,new_values,ip_address,user_agent)
+			VALUES (?, ?, 'procurement_supplier', ?, ?::jsonb, ?::jsonb, ?, ?)`, user.ID, auditAction, strconv.FormatUint(uint64(id), 10), string(beforeJSON), string(changes), requestIP(r), r.UserAgent()).Error; err != nil {
+			return err
+		}
+		if err := tx.Create(&models.Activity{EntityType: "supplier", EntityID: id, Action: activityAction, UserID: user.ID, Username: user.Username, Details: "origin=" + origin + " " + updated.Name}).Error; err != nil {
+			return err
+		}
+		return completeIdempotentMutation(tx, idempotency, http.StatusOK, updated)
+	})
+	if err != nil {
+		var flowErr *receiptFlowError
+		if errors.As(err, &flowErr) || errors.Is(err, gorm.ErrRecordNotFound) {
+			writeProcurementFlowError(w, err)
+		} else {
+			conflictOrServer(w, err)
+		}
 		return
 	}
-	h.activity(r, "supplier", input.ID, "updated", input.Name)
-	writeJSON(w, http.StatusOK, input)
+	writeJSON(w, http.StatusOK, updated)
 }
 
 func (h *Handler) deleteSupplier(w http.ResponseWriter, r *http.Request) {
@@ -1459,6 +1512,17 @@ func (err *receiptFlowError) Error() string { return err.message }
 
 func isMCPMutation(r *http.Request) bool {
 	return strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Cores-Origin")), "MCP/AI")
+}
+
+func requestIP(r *http.Request) string {
+	ip := r.RemoteAddr
+	if host, _, err := net.SplitHostPort(ip); err == nil {
+		ip = host
+	}
+	if len(ip) > 45 {
+		ip = ip[:45]
+	}
+	return ip
 }
 
 func validateExpectedUpdate(actual time.Time, expected *time.Time, required bool) *receiptFlowError {

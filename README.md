@@ -1,5 +1,13 @@
 # ProcurementCore
 
+Release `1.0.46` aktualisiert Lieferanten mit einer Sperre und einer für
+MCP/KI verpflichtenden `expectedUpdatedAt`-Versionsprüfung. Vorher-/Nachher-
+Werte, Aktivität, Audit-Herkunft und Idempotenz-Ergebnis werden atomar
+gespeichert. `active=false` deaktiviert einen Lieferanten ohne Löschung und
+erscheint im Audit als `supplier.deactivate`; erneutes Aktivieren erscheint als
+`supplier.reactivate`. Offene Bestellungen blockieren die Deaktivierung. Die
+bestehende UI kann Lieferanten weiter direkt ändern.
+
 Release `1.0.45` speichert die Anlage von Lieferanten zusammen mit Aktivität,
 Audit-Herkunft (`UI` oder `MCP/AI`) und bei MCP-Aufrufen dem dauerhaft
 gespeicherten Idempotenz-Ergebnis in einer Transaktion. Ein fehlgeschlagener
@@ -232,7 +240,7 @@ Im Gesamt-Stack läuft ProcurementCore als eigener Compose-Service auf Host-Port
 
 ## API
 
-Alle fachlichen Endpunkte liegen unter `/api/v1` und erwarten das gemeinsame SSO-Cookie oder einen Bearer-Token. Wichtige Ressourcen sind `/products`, `/product-links`, `/suppliers`, `/alerts`, `/requisitions`, `/orders`, `/dashboard` und `/export/spend.csv`. Über `/products/:id/warehouse-link` werden bestehende Produkte verknüpft oder wieder getrennt. Admins prüfen mit `POST /orders/:id/adam-hall/cart` einen serverseitigen Live-Warenkorb und übertragen ihn mit `POST /orders/:id/adam-hall/order` verbindlich; zulässig sind ausschließlich Entwürfe eines eindeutig erkannten Adam-Hall-Lieferanten mit ganzzahligen Katalogpositionen. `POST /requisitions/:id/decision` erzwingt für MCP/KI die Version und generell einen anderen Entscheider als den Anforderer. `POST /orders/:id/receipt` sperrt Bestellung und Position, dokumentiert den Eingang und aktualisiert bei verknüpften Artikeln atomar Mengenbestand oder Devices sowie den Putaway-Task. `GET /health` und `GET /api/v1/branding` sind öffentlich.
+Alle fachlichen Endpunkte liegen unter `/api/v1` und erwarten das gemeinsame SSO-Cookie oder einen Bearer-Token. Wichtige Ressourcen sind `/products`, `/product-links`, `/suppliers`, `/alerts`, `/requisitions`, `/orders`, `/dashboard` und `/export/spend.csv`. `PUT /suppliers/:id` verlangt für MCP/KI `expectedUpdatedAt` und setzt `active=false` ohne Löschung; Anlage und Änderung schreiben ein transaktionales Audit. Über `/products/:id/warehouse-link` werden bestehende Produkte verknüpft oder wieder getrennt. Admins prüfen mit `POST /orders/:id/adam-hall/cart` einen serverseitigen Live-Warenkorb und übertragen ihn mit `POST /orders/:id/adam-hall/order` verbindlich; zulässig sind ausschließlich Entwürfe eines eindeutig erkannten Adam-Hall-Lieferanten mit ganzzahligen Katalogpositionen. `POST /requisitions/:id/decision` erzwingt für MCP/KI die Version und generell einen anderen Entscheider als den Anforderer. `POST /orders/:id/receipt` sperrt Bestellung und Position, dokumentiert den Eingang und aktualisiert bei verknüpften Artikeln atomar Mengenbestand oder Devices sowie den Putaway-Task. `GET /health` und `GET /api/v1/branding` sind öffentlich.
 
 ## Datenhaltung
 
