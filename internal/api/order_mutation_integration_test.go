@@ -80,6 +80,8 @@ func TestOrderCreateAndTransitionVersionAuditReplay(t *testing.T) {
 			h.createOrder(w, r)
 		} else if method == http.MethodPost {
 			h.receiveOrder(w, r)
+		} else if strings.HasSuffix(path, "/draft") {
+			h.updateOrderDraft(w, r)
 		} else {
 			h.updateOrder(w, r)
 		}
@@ -106,6 +108,28 @@ func TestOrderCreateAndTransitionVersionAuditReplay(t *testing.T) {
 		t.Fatalf("unsafe create: %#v", row)
 	}
 	path += "/" + strconv.FormatUint(uint64(row.ID), 10)
+	draftPath := path + "/draft"
+	draftUpdate := map[string]any{"supplierId": supplier.ID, "status": "draft", "currency": "USD", "supplierOrderNumber": "S-17", "notes": "Updated draft", "lines": []any{map[string]any{"description": "Replacement cable", "quantity": 3, "unitPriceCents": 1200, "receivedQuantity": 3}, map[string]any{"description": "Connector", "quantity": 1, "unitPriceCents": 400}}}
+	if result := call(http.MethodPut, draftPath, "order-draft-no-version", draftUpdate); result.Code != http.StatusPreconditionRequired {
+		t.Fatalf("draft update without version: %d %s", result.Code, result.Body.String())
+	}
+	draftUpdate["expectedUpdatedAt"] = row.UpdatedAt.UTC().Format(time.RFC3339Nano)
+	draftChanged := call(http.MethodPut, draftPath, "order-draft-001", draftUpdate)
+	if draftChanged.Code != http.StatusOK {
+		t.Fatalf("draft update: %d %s", draftChanged.Code, draftChanged.Body.String())
+	}
+	if replay := call(http.MethodPut, draftPath, "order-draft-001", draftUpdate); replay.Code != http.StatusOK || replay.Body.String() != draftChanged.Body.String() {
+		t.Fatalf("draft update replay: %d %s", replay.Code, replay.Body.String())
+	}
+	if stale := call(http.MethodPut, draftPath, "order-draft-stale", draftUpdate); stale.Code != http.StatusConflict {
+		t.Fatalf("stale draft update: %d %s", stale.Code, stale.Body.String())
+	}
+	if err := json.Unmarshal(draftChanged.Body.Bytes(), &row); err != nil {
+		t.Fatal(err)
+	}
+	if row.Currency != "USD" || row.TotalCents != 4000 || len(row.Lines) != 2 || row.Lines[0].ReceivedQuantity != 0 {
+		t.Fatalf("incorrect draft replacement: %#v", row)
+	}
 	update := map[string]any{"status": "sent", "supplierOrderNumber": "S-17", "notes": "Dispatched"}
 	if result := call(http.MethodPut, path, "order-update-no-version", update); result.Code != http.StatusPreconditionRequired {
 		t.Fatalf("missing version: %d %s", result.Code, result.Body.String())
@@ -120,6 +144,10 @@ func TestOrderCreateAndTransitionVersionAuditReplay(t *testing.T) {
 	}
 	if err := json.Unmarshal(sent.Body.Bytes(), &row); err != nil {
 		t.Fatal(err)
+	}
+	draftUpdate["expectedUpdatedAt"] = row.UpdatedAt.UTC().Format(time.RFC3339Nano)
+	if result := call(http.MethodPut, draftPath, "order-draft-after-send", draftUpdate); result.Code != http.StatusConflict {
+		t.Fatalf("sent order draft changed: %d %s", result.Code, result.Body.String())
 	}
 	receiptPayload := map[string]any{"lineId": row.Lines[0].ID, "quantity": 1, "note": "Box one", "expectedUpdatedAt": row.UpdatedAt.UTC().Format(time.RFC3339Nano)}
 	received := call(http.MethodPost, path+"/receipt", "order-receipt-001", receiptPayload)
@@ -144,7 +172,7 @@ func TestOrderCreateAndTransitionVersionAuditReplay(t *testing.T) {
 	if result := call(http.MethodPut, path, "order-cancel-001", update); result.Code != http.StatusOK {
 		t.Fatalf("cancel: %d %s", result.Code, result.Body.String())
 	}
-	for table, want := range map[string]int64{"proc_purchase_orders": 1, "proc_purchase_order_lines": 1, "proc_receipts": 1, "audit_log": 4, "proc_activities": 4, "proc_idempotency_records": 4} {
+	for table, want := range map[string]int64{"proc_purchase_orders": 1, "proc_purchase_order_lines": 2, "proc_receipts": 1, "audit_log": 5, "proc_activities": 5, "proc_idempotency_records": 5} {
 		var count int64
 		if err := db.Table(table).Count(&count).Error; err != nil || count != want {
 			t.Fatalf("%s count=%d err=%v want=%d", table, count, err, want)

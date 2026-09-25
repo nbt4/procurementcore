@@ -1,5 +1,13 @@
 # ProcurementCore
 
+Release `1.0.54` erlaubt die vollständige Bearbeitung eines Bestellentwurfs
+über `PUT /api/v1/orders/{id}/draft`. Lieferant, Bestellnummer, Währung,
+Termine, Notizen und sämtliche Positionen werden nach Prüfung aktiver
+Referenzen und der exakten Version in einer Transaktion ersetzt. Bereits
+versendete Bestellungen bleiben gesperrt; gelieferte Mengen können über diesen
+Endpunkt nicht gesetzt werden. Audit, Aktivität und Idempotenzbeleg entstehen
+atomar mit der Änderung.
+
 Release `1.0.53` verknüpft bestehende Procurement- und Warehouse-Produkte
 versionsgesichert. Anlage und Neuverknüpfung sperren beide Produktdatensätze,
 prüfen aktive und eindeutige Referenzen und speichern Link, Audit, Aktivität

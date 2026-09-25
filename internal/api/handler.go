@@ -83,6 +83,7 @@ func (h *Handler) Routes() http.Handler {
 	r.With(auth.RequireAdmin).Post("/orders/import-preview", h.previewOrderImport)
 	r.With(auth.RequireAdmin).Post("/orders", h.createOrder)
 	r.With(auth.RequireAdmin).Put("/orders/{id}", h.updateOrder)
+	r.With(auth.RequireAdmin).Put("/orders/{id}/draft", h.updateOrderDraft)
 	r.With(auth.RequireAdmin).Post("/orders/{id}/adam-hall/cart", h.previewAdamHallOrder)
 	r.With(auth.RequireAdmin).Post("/orders/{id}/adam-hall/order", h.placeAdamHallOrder)
 	r.With(auth.RequireAdmin).Post("/orders/{id}/receipt", h.receiveOrder)
