@@ -1019,22 +1019,29 @@ func validateOffer(row *models.Offer) string {
 	if row.SupplierID == 0 || row.PriceCents < 0 {
 		return "Lieferant und nicht-negativer Preis sind erforderlich"
 	}
+	row.SupplierSKU = strings.TrimSpace(row.SupplierSKU)
+	if len([]rune(row.SupplierSKU)) > 120 || row.LeadDays < 0 || math.IsNaN(row.MinimumQuantity) || math.IsNaN(row.PackSize) || math.IsInf(row.MinimumQuantity, 0) || math.IsInf(row.PackSize, 0) {
+		return "Ungültige Angebotsfelder"
+	}
 	if row.Currency == "" {
 		row.Currency = "EUR"
 	}
 	row.Currency = strings.ToUpper(row.Currency)
-	if len(row.Currency) != 3 {
+	if len(row.Currency) != 3 || strings.Trim(row.Currency, "ABCDEFGHIJKLMNOPQRSTUVWXYZ") != "" {
 		return "Währung muss aus drei Buchstaben bestehen"
 	}
-	if row.MinimumQuantity <= 0 {
+	if row.MinimumQuantity < 0 || row.PackSize < 0 {
+		return "Mindestmenge und Packgröße dürfen nicht negativ sein"
+	}
+	if row.MinimumQuantity == 0 {
 		row.MinimumQuantity = 1
 	}
-	if row.PackSize <= 0 {
+	if row.PackSize == 0 {
 		row.PackSize = 1
 	}
 	if row.PurchaseURL != "" {
 		u, err := url.ParseRequestURI(row.PurchaseURL)
-		if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || len(row.PurchaseURL) > 2000 {
 			return "Einkaufslink muss eine gültige HTTP(S)-URL sein"
 		}
 	}
@@ -1056,18 +1063,39 @@ func (h *Handler) createOffer(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, msg)
 		return
 	}
+	row.LastCheckedAt = time.Time{}
 	err := h.db.Transaction(func(tx *gorm.DB) error {
+		idempotency, replay, err := beginIdempotentMutation(tx, r, fmt.Sprintf("offer_create:%d", productID), row)
+		if err != nil {
+			return err
+		}
+		if replay != nil {
+			return json.Unmarshal(replay, &row)
+		}
+		if err := validateOfferReferences(tx, row.ProductID, row.SupplierID, true); err != nil {
+			return err
+		}
+		row.LastCheckedAt = time.Now()
 		if err := tx.Create(&row).Error; err != nil {
 			return err
 		}
-		return service.RecordPriceAndEvaluateAlerts(tx, &row)
+		if err := service.RecordPriceAndEvaluateAlerts(tx, &row); err != nil {
+			return err
+		}
+		if err := auditOfferMutation(tx, r, "offer.create", nil, &row); err != nil {
+			return err
+		}
+		return completeIdempotentMutation(tx, idempotency, http.StatusCreated, row)
 	})
 	if err != nil {
-		conflictOrServer(w, err)
+		var flowErr *receiptFlowError
+		if errors.As(err, &flowErr) {
+			writeProcurementFlowError(w, err)
+		} else {
+			conflictOrServer(w, err)
+		}
 		return
 	}
-	h.activity(r, "offer", row.ID, "created", fmt.Sprintf("product=%d price=%d", row.ProductID, row.PriceCents))
-	h.db.Preload("Supplier").First(&row, row.ID)
 	writeJSON(w, http.StatusCreated, row)
 }
 
@@ -1076,36 +1104,111 @@ func (h *Handler) updateOffer(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var existing models.Offer
-	if err := h.db.First(&existing, id).Error; err != nil {
-		notFound(w)
-		return
+	var input struct {
+		models.Offer
+		ExpectedUpdatedAt *time.Time `json:"expectedUpdatedAt"`
 	}
-	var input models.Offer
 	if !decode(w, r, &input) {
 		return
 	}
-	input.ID, input.ProductID, input.CreatedAt = existing.ID, existing.ProductID, existing.CreatedAt
-	if msg := validateOffer(&input); msg != "" {
+	if msg := validateOffer(&input.Offer); msg != "" {
 		badRequest(w, msg)
 		return
 	}
+	input.LastCheckedAt = time.Time{}
+	var updated models.Offer
 	err := h.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Save(&input).Error; err != nil {
+		idempotency, replay, err := beginIdempotentMutation(tx, r, fmt.Sprintf("offer_update:%d", id), input)
+		if err != nil {
 			return err
 		}
-		if input.PriceCents != existing.PriceCents {
-			return service.RecordPriceAndEvaluateAlerts(tx, &input)
+		if replay != nil {
+			return json.Unmarshal(replay, &updated)
 		}
-		return nil
+		var existing models.Offer
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&existing, id).Error; err != nil {
+			return err
+		}
+		if err := validateExpectedUpdate(existing.UpdatedAt, input.ExpectedUpdatedAt, isMCPMutation(r)); err != nil {
+			return err
+		}
+		if err := validateOfferReferences(tx, existing.ProductID, input.SupplierID, input.Active); err != nil {
+			return err
+		}
+		updated = input.Offer
+		updated.ID, updated.ProductID, updated.CreatedAt = existing.ID, existing.ProductID, existing.CreatedAt
+		updated.UpdatedAt, updated.Supplier = time.Time{}, nil
+		updated.LastCheckedAt = time.Now()
+		if err := tx.Save(&updated).Error; err != nil {
+			return err
+		}
+		if updated.PriceCents != existing.PriceCents {
+			if err := service.RecordPriceAndEvaluateAlerts(tx, &updated); err != nil {
+				return err
+			}
+		}
+		action := "offer.update"
+		if existing.Active && !updated.Active {
+			action = "offer.deactivate"
+		} else if !existing.Active && updated.Active {
+			action = "offer.reactivate"
+		}
+		if err := auditOfferMutation(tx, r, action, &existing, &updated); err != nil {
+			return err
+		}
+		return completeIdempotentMutation(tx, idempotency, http.StatusOK, updated)
 	})
 	if err != nil {
-		conflictOrServer(w, err)
+		var flowErr *receiptFlowError
+		if errors.As(err, &flowErr) || errors.Is(err, gorm.ErrRecordNotFound) {
+			writeProcurementFlowError(w, err)
+		} else {
+			conflictOrServer(w, err)
+		}
 		return
 	}
-	h.activity(r, "offer", input.ID, "updated", fmt.Sprintf("price=%d", input.PriceCents))
-	h.db.Preload("Supplier").First(&input, input.ID)
-	writeJSON(w, http.StatusOK, input)
+	writeJSON(w, http.StatusOK, updated)
+}
+
+func validateOfferReferences(tx *gorm.DB, productID, supplierID uint, requireActive bool) error {
+	var products, suppliers int64
+	productQuery := tx.Model(&models.Product{}).Where("id = ?", productID)
+	supplierQuery := tx.Model(&models.Supplier{}).Where("id = ?", supplierID)
+	if requireActive {
+		productQuery = productQuery.Where("active = true")
+		supplierQuery = supplierQuery.Where("active = true")
+	}
+	if err := productQuery.Count(&products).Error; err != nil {
+		return err
+	}
+	if err := supplierQuery.Count(&suppliers).Error; err != nil {
+		return err
+	}
+	if products == 0 || suppliers == 0 {
+		return &receiptFlowError{status: http.StatusConflict, code: "offer_reference_inactive", message: "Aktives Produkt und aktiver Lieferant sind erforderlich"}
+	}
+	return nil
+}
+
+func auditOfferMutation(tx *gorm.DB, r *http.Request, action string, before, after *models.Offer) error {
+	origin := "UI"
+	if isMCPMutation(r) {
+		origin = "MCP/AI"
+	}
+	beforeJSON, err := json.Marshal(before)
+	if err != nil {
+		return err
+	}
+	changes, err := json.Marshal(map[string]any{"origin": origin, "before": before, "after": after})
+	if err != nil {
+		return err
+	}
+	user := auth.CurrentUser(r)
+	if err := tx.Exec(`INSERT INTO audit_log (user_id,action,entity_type,entity_id,old_values,new_values,ip_address,user_agent)
+		VALUES (?, ?, 'procurement_offer', ?, ?::jsonb, ?::jsonb, ?, ?)`, user.ID, action, strconv.FormatUint(uint64(after.ID), 10), string(beforeJSON), string(changes), requestIP(r), r.UserAgent()).Error; err != nil {
+		return err
+	}
+	return tx.Create(&models.Activity{EntityType: "offer", EntityID: after.ID, Action: strings.TrimPrefix(action, "offer."), UserID: user.ID, Username: user.Username, Details: "origin=" + origin + " product=" + strconv.FormatUint(uint64(after.ProductID), 10)}).Error
 }
 
 func (h *Handler) deleteOffer(w http.ResponseWriter, r *http.Request) {

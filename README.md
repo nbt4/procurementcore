@@ -1,5 +1,10 @@
 # ProcurementCore
 
+Release `1.0.49` schützt Anlage und Änderung von Lieferantenangeboten mit
+Versionsprüfung, transaktionalem Audit und dauerhafter Idempotenz. Preisänderungen
+schreiben die Preishistorie in derselben Transaktion. `active=false` archiviert
+ein Angebot, ohne Historie oder Bestellungen zu löschen.
+
 Release `1.0.48` schützt Produktanlage und Produktänderung durch transaktionales
 Audit und dauerhafte Idempotenz. `PUT /products/:id` verlangt bei MCP/KI die
 exakte `expectedUpdatedAt`-Version; unter Datensatzsperre werden Kategorie und
