@@ -50,7 +50,7 @@ func TestOrderCreateAndTransitionVersionAuditReplay(t *testing.T) {
 	if err := db.Exec("SET search_path TO " + schema).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&models.Category{}, &models.Product{}, &models.Supplier{}, &models.PurchaseOrder{}, &models.PurchaseOrderLine{}, &models.Activity{}, &models.IdempotencyRecord{}); err != nil {
+	if err := db.AutoMigrate(&models.Category{}, &models.Product{}, &models.Supplier{}, &models.PurchaseOrder{}, &models.PurchaseOrderLine{}, &models.Receipt{}, &models.Activity{}, &models.IdempotencyRecord{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Exec(`CREATE TABLE audit_log (id BIGSERIAL PRIMARY KEY,user_id BIGINT,action TEXT,entity_type TEXT,entity_id TEXT,old_values JSONB,new_values JSONB,ip_address TEXT,user_agent TEXT)`).Error; err != nil {
@@ -76,8 +76,10 @@ func TestOrderCreateAndTransitionVersionAuditReplay(t *testing.T) {
 			r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, route))
 		}
 		w := httptest.NewRecorder()
-		if method == http.MethodPost {
+		if method == http.MethodPost && path == "/api/v1/orders" {
 			h.createOrder(w, r)
+		} else if method == http.MethodPost {
+			h.receiveOrder(w, r)
 		} else {
 			h.updateOrder(w, r)
 		}
@@ -119,6 +121,20 @@ func TestOrderCreateAndTransitionVersionAuditReplay(t *testing.T) {
 	if err := json.Unmarshal(sent.Body.Bytes(), &row); err != nil {
 		t.Fatal(err)
 	}
+	receiptPayload := map[string]any{"lineId": row.Lines[0].ID, "quantity": 1, "note": "Box one", "expectedUpdatedAt": row.UpdatedAt.UTC().Format(time.RFC3339Nano)}
+	received := call(http.MethodPost, path+"/receipt", "order-receipt-001", receiptPayload)
+	if received.Code != http.StatusCreated {
+		t.Fatalf("receipt: %d %s", received.Code, received.Body.String())
+	}
+	if replay := call(http.MethodPost, path+"/receipt", "order-receipt-001", receiptPayload); replay.Code != http.StatusCreated || replay.Body.String() != received.Body.String() {
+		t.Fatalf("receipt replay: %d %s", replay.Code, replay.Body.String())
+	}
+	if err := db.First(&row, row.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if row.Status != "partially_received" {
+		t.Fatalf("partial receipt did not update order: %#v", row)
+	}
 	update["status"] = "draft"
 	update["expectedUpdatedAt"] = row.UpdatedAt.UTC().Format(time.RFC3339Nano)
 	if result := call(http.MethodPut, path, "order-backwards", update); result.Code != http.StatusConflict {
@@ -128,7 +144,7 @@ func TestOrderCreateAndTransitionVersionAuditReplay(t *testing.T) {
 	if result := call(http.MethodPut, path, "order-cancel-001", update); result.Code != http.StatusOK {
 		t.Fatalf("cancel: %d %s", result.Code, result.Body.String())
 	}
-	for table, want := range map[string]int64{"proc_purchase_orders": 1, "proc_purchase_order_lines": 1, "audit_log": 3, "proc_activities": 3, "proc_idempotency_records": 3} {
+	for table, want := range map[string]int64{"proc_purchase_orders": 1, "proc_purchase_order_lines": 1, "proc_receipts": 1, "audit_log": 4, "proc_activities": 4, "proc_idempotency_records": 4} {
 		var count int64
 		if err := db.Table(table).Count(&count).Error; err != nil || count != want {
 			t.Fatalf("%s count=%d err=%v want=%d", table, count, err, want)

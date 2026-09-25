@@ -1660,14 +1660,12 @@ func (h *Handler) decideRequisition(w http.ResponseWriter, r *http.Request) {
 	}
 	user := auth.CurrentUser(r)
 	var row models.Requisition
-	replayed := false
 	err := h.db.Transaction(func(tx *gorm.DB) error {
 		idempotency, replay, err := beginIdempotentMutation(tx, r, "requisition_decision", map[string]any{"id": id, "input": input})
 		if err != nil {
 			return err
 		}
 		if replay != nil {
-			replayed = true
 			return json.Unmarshal(replay, &row)
 		}
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&row, id).Error; err != nil {
@@ -1682,9 +1680,16 @@ func (h *Handler) decideRequisition(w http.ResponseWriter, r *http.Request) {
 		if versionErr := validateExpectedUpdate(row.UpdatedAt, input.ExpectedUpdatedAt, isMCPMutation(r)); versionErr != nil {
 			return versionErr
 		}
+		before := row
 		now := time.Now()
 		row.Status, row.ApprovedBy, row.ApprovedByName, row.DecisionNote, row.DecidedAt = input.Decision, &user.ID, user.Username, strings.TrimSpace(input.Note), &now
 		if err := tx.Save(&row).Error; err != nil {
+			return err
+		}
+		if err := tx.First(&row, id).Error; err != nil {
+			return err
+		}
+		if err := auditRequisitionMutation(tx, r, input.Decision, before, row); err != nil {
 			return err
 		}
 		return completeIdempotentMutation(tx, idempotency, http.StatusOK, row)
@@ -1692,9 +1697,6 @@ func (h *Handler) decideRequisition(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeProcurementFlowError(w, err)
 		return
-	}
-	if !replayed {
-		h.activity(r, "requisition", id, input.Decision, fmt.Sprintf("from=submitted to=%s number=%s", input.Decision, row.Number))
 	}
 	writeJSON(w, http.StatusOK, row)
 }
@@ -2340,14 +2342,13 @@ func (h *Handler) receiveOrder(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &input) {
 		return
 	}
-	if input.LineID == 0 || input.Quantity <= 0 {
+	if input.LineID == 0 || input.Quantity <= 0 || math.IsNaN(input.Quantity) || math.IsInf(input.Quantity, 0) || input.Quantity > 1e9 {
 		badRequest(w, "Position und positive Menge sind erforderlich")
 		return
 	}
 	user := auth.CurrentUser(r)
 	var line models.PurchaseOrderLine
 	var order models.PurchaseOrder
-	replayed := false
 	receipt := models.Receipt{PurchaseOrderID: id, PurchaseOrderLineID: input.LineID, Quantity: input.Quantity, ReceivedBy: user.ID, ReceivedByName: user.Username, Note: input.Note, ReceivedAt: time.Now()}
 	err := h.db.Transaction(func(tx *gorm.DB) error {
 		idempotency, replay, err := beginIdempotentMutation(tx, r, "purchase_order_receipt", map[string]any{"id": id, "input": input})
@@ -2355,7 +2356,6 @@ func (h *Handler) receiveOrder(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		if replay != nil {
-			replayed = true
 			return json.Unmarshal(replay, &receipt)
 		}
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&order, id).Error; err != nil {
@@ -2370,6 +2370,7 @@ func (h *Handler) receiveOrder(w http.ResponseWriter, r *http.Request) {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND purchase_order_id = ?", input.LineID, id).First(&line).Error; err != nil {
 			return err
 		}
+		beforeOrder, beforeLine := order, line
 		if line.ReceivedQuantity+input.Quantity > line.Quantity && !input.AllowOverdelivery {
 			return &receiptFlowError{status: http.StatusBadRequest, code: "ordered_quantity_exceeded", message: "Wareneingang überschreitet Bestellmenge"}
 		}
@@ -2472,26 +2473,46 @@ func (h *Handler) receiveOrder(w http.ResponseWriter, r *http.Request) {
 		if err := tx.Model(&order).Update("status", status).Error; err != nil {
 			return err
 		}
+		if err := tx.First(&order, id).Error; err != nil {
+			return err
+		}
+		if err := auditGoodsReceipt(tx, r, beforeOrder, order, beforeLine, line, receipt); err != nil {
+			return err
+		}
 		return completeIdempotentMutation(tx, idempotency, http.StatusCreated, receipt)
 	})
 	if err != nil {
 		writeProcurementFlowError(w, err)
 		return
 	}
-	details := fmt.Sprintf("line=%d quantity=%g", line.ID, input.Quantity)
-	if input.AllowOverdelivery && line.ReceivedQuantity > line.Quantity {
-		details += fmt.Sprintf(" overdelivery=%g", line.ReceivedQuantity-line.Quantity)
+	writeJSON(w, http.StatusCreated, receipt)
+}
+
+func auditGoodsReceipt(tx *gorm.DB, r *http.Request, beforeOrder, afterOrder models.PurchaseOrder, beforeLine, afterLine models.PurchaseOrderLine, receipt models.Receipt) error {
+	user := auth.CurrentUser(r)
+	origin := "UI"
+	if isMCPMutation(r) {
+		origin = "MCP/AI"
 	}
+	beforeJSON, err := json.Marshal(map[string]any{"order": beforeOrder, "line": beforeLine})
+	if err != nil {
+		return err
+	}
+	afterJSON, err := json.Marshal(map[string]any{"origin": origin, "order": afterOrder, "line": afterLine, "receipt": receipt})
+	if err != nil {
+		return err
+	}
+	if err := tx.Exec(`INSERT INTO audit_log (user_id,action,entity_type,entity_id,old_values,new_values,ip_address,user_agent) VALUES (?, 'order.goods_received', 'procurement_order', ?, ?::jsonb, ?::jsonb, ?, ?)`, user.ID, strconv.FormatUint(uint64(afterOrder.ID), 10), string(beforeJSON), string(afterJSON), requestIP(r), r.UserAgent()).Error; err != nil {
+		return err
+	}
+	details := fmt.Sprintf("origin=%s line=%d quantity=%g", origin, afterLine.ID, receipt.Quantity)
 	if receipt.WarehouseProductID != nil {
 		details += fmt.Sprintf(" warehouse_product=%d tracking=%s applied=%g", *receipt.WarehouseProductID, receipt.WarehouseTrackingMode, receipt.WarehouseQuantityApplied)
 	}
 	if receipt.PutawayTaskID != nil {
 		details += fmt.Sprintf(" putaway_task=%d devices_created=%d", *receipt.PutawayTaskID, len(receipt.CreatedDeviceIDs))
 	}
-	if !replayed {
-		h.activity(r, "purchase_order", id, "goods_received", details)
-	}
-	writeJSON(w, http.StatusCreated, receipt)
+	return tx.Create(&models.Activity{EntityType: "purchase_order", EntityID: afterOrder.ID, Action: "goods_received", UserID: user.ID, Username: user.Username, Details: details}).Error
 }
 
 func lockAndValidateReceiptSerial(tx *gorm.DB, serial string) error {

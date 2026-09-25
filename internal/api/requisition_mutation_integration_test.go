@@ -137,7 +137,37 @@ func TestRequisitionDraftMutationVersionAuditAndReplay(t *testing.T) {
 	if changed := call(http.MethodPut, path, "requisition-update-after-submit", updatePayload); changed.Code != http.StatusForbidden {
 		t.Fatalf("submitted requisition changed: %d %s", changed.Code, changed.Body.String())
 	}
-	for table, want := range map[string]int64{"proc_requisitions": 1, "proc_requisition_lines": 1, "audit_log": 3, "proc_activities": 3, "proc_idempotency_records": 3} {
+	if err := db.Exec("UPDATE proc_requisitions SET requester_id=1 WHERE id=?", row.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	var submittedRow models.Requisition
+	if err := json.Unmarshal(submitted.Body.Bytes(), &submittedRow); err != nil {
+		t.Fatal(err)
+	}
+	decisionPayload := map[string]any{"decision": "approved", "note": "Budget approved", "expectedUpdatedAt": submittedRow.UpdatedAt.UTC().Format(time.RFC3339Nano)}
+	decide := func(key string) *httptest.ResponseRecorder {
+		body, err := json.Marshal(decisionPayload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := httptest.NewRequest(http.MethodPost, path+"/decision", bytes.NewReader(body))
+		r.Header.Set("X-Cores-Origin", "MCP/AI")
+		r.Header.Set("Idempotency-Key", key)
+		route := chi.NewRouteContext()
+		route.URLParams.Add("id", strconv.FormatUint(uint64(row.ID), 10))
+		r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, route))
+		w := httptest.NewRecorder()
+		h.decideRequisition(w, r)
+		return w
+	}
+	approved := decide("requisition-decision-001")
+	if approved.Code != http.StatusOK {
+		t.Fatalf("decision: %d %s", approved.Code, approved.Body.String())
+	}
+	if replay := decide("requisition-decision-001"); replay.Code != http.StatusOK || replay.Body.String() != approved.Body.String() {
+		t.Fatalf("decision replay: %d %s", replay.Code, replay.Body.String())
+	}
+	for table, want := range map[string]int64{"proc_requisitions": 1, "proc_requisition_lines": 1, "audit_log": 4, "proc_activities": 4, "proc_idempotency_records": 4} {
 		var count int64
 		if err := db.Table(table).Count(&count).Error; err != nil || count != want {
 			t.Fatalf("%s count=%d err=%v want=%d", table, count, err, want)

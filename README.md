@@ -1,5 +1,12 @@
 # ProcurementCore
 
+Release `1.0.52` schreibt Entscheidungen zu Bedarfsanforderungen sowie
+Wareneingänge mit Vorher-/Nachher-Werten, MCP/KI-Herkunft und Aktivität direkt
+in der jeweiligen Datenbanktransaktion. Schlägt der Audit-Eintrag fehl, wird
+die gesamte Änderung zurückgerollt. Wareneingänge lehnen nicht endliche oder
+übermäßig große Mengen ab.
+
+
 Release `1.0.51` schützt Bestellanlage und Statuswechsel mit erneuter Prüfung
 aktiver Lieferanten/Produkte, Versionssperre, transaktionalem Audit und
 dauerhafter Idempotenz. MCP/KI darf Bestellungen nur als Entwurf anlegen;
