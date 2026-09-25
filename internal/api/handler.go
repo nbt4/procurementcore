@@ -1819,12 +1819,24 @@ func validateOrder(row *models.PurchaseOrder) string {
 	if len([]rune(row.SupplierOrderNumber)) > 120 {
 		return "Lieferanten-Bestellnummer darf maximal 120 Zeichen lang sein"
 	}
+	var estimatedTotal float64
 	for i := range row.Lines {
-		if row.Lines[i].Description == "" || row.Lines[i].Quantity <= 0 || row.Lines[i].UnitPriceCents < 0 {
+		line := &row.Lines[i]
+		line.Description = strings.TrimSpace(line.Description)
+		line.Unit = strings.TrimSpace(line.Unit)
+		line.PurchaseURL = strings.TrimSpace(line.PurchaseURL)
+		if line.Description == "" || line.Quantity <= 0 || math.IsNaN(line.Quantity) || math.IsInf(line.Quantity, 0) || line.UnitPriceCents < 0 {
 			return "Ungültige Bestellposition"
 		}
-		if row.Lines[i].Unit == "" {
-			row.Lines[i].Unit = "Stk."
+		if len([]rune(line.Description)) > 500 || len([]rune(line.Unit)) > 30 || len(line.PurchaseURL) > 2000 || line.Quantity > 1e9 || line.UnitPriceCents > 1e9 {
+			return "Bestellposition überschreitet erlaubte Grenzen"
+		}
+		estimatedTotal += line.Quantity * float64(line.UnitPriceCents)
+		if estimatedTotal > 9e18 {
+			return "Gesamtwert der Bestellung ist zu groß"
+		}
+		if line.Unit == "" {
+			line.Unit = "Stk."
 		}
 	}
 	row.TotalCents = service.PurchaseOrderTotal(row.Lines)
@@ -1833,6 +1845,66 @@ func validateOrder(row *models.PurchaseOrder) string {
 
 func normalizeSupplierOrderNumber(value string) string {
 	return strings.TrimSpace(value)
+}
+
+func validateOrderReferences(tx *gorm.DB, row *models.PurchaseOrder) error {
+	var count int64
+	if err := tx.Model(&models.Supplier{}).Where("id = ? AND active = true", row.SupplierID).Count(&count).Error; err != nil {
+		return err
+	}
+	if count != 1 {
+		return &receiptFlowError{status: http.StatusConflict, code: "supplier_inactive", message: "Lieferant existiert nicht oder ist inaktiv"}
+	}
+	for _, line := range row.Lines {
+		if line.ProductID == nil {
+			continue
+		}
+		if err := tx.Model(&models.Product{}).Where("id = ? AND active = true", *line.ProductID).Count(&count).Error; err != nil {
+			return err
+		}
+		if count != 1 {
+			return &receiptFlowError{status: http.StatusConflict, code: "product_inactive", message: "Bestellposition verweist auf ein fehlendes oder archiviertes Produkt"}
+		}
+	}
+	return nil
+}
+
+func auditOrderMutation(tx *gorm.DB, r *http.Request, action string, before any, after models.PurchaseOrder) error {
+	user := auth.CurrentUser(r)
+	origin := "UI"
+	if isMCPMutation(r) {
+		origin = "MCP/AI"
+	}
+	beforeJSON, err := json.Marshal(before)
+	if err != nil {
+		return err
+	}
+	afterJSON, err := json.Marshal(map[string]any{"origin": origin, "purchase_order": after})
+	if err != nil {
+		return err
+	}
+	if err := tx.Exec(`INSERT INTO audit_log (user_id,action,entity_type,entity_id,old_values,new_values,ip_address,user_agent) VALUES (?, ?, 'procurement_order', ?, ?::jsonb, ?::jsonb, ?, ?)`, user.ID, "order."+action, strconv.FormatUint(uint64(after.ID), 10), string(beforeJSON), string(afterJSON), requestIP(r), r.UserAgent()).Error; err != nil {
+		return err
+	}
+	return tx.Create(&models.Activity{EntityType: "purchase_order", EntityID: after.ID, Action: action, UserID: user.ID, Username: user.Username, Details: "origin=" + origin + " " + after.Number}).Error
+}
+
+func orderTransitionAllowed(from, to string) bool {
+	if from == to {
+		return true
+	}
+	switch from {
+	case "draft":
+		return to == "sent" || to == "cancelled"
+	case "sent":
+		return to == "confirmed" || to == "cancelled"
+	case "confirmed", "partially_received":
+		return to == "cancelled"
+	case "submission_unknown":
+		return to == "draft"
+	default:
+		return false
+	}
 }
 
 func (h *Handler) createOrder(w http.ResponseWriter, r *http.Request) {
@@ -1844,20 +1916,51 @@ func (h *Handler) createOrder(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, msg)
 		return
 	}
-	user := auth.CurrentUser(r)
-	row.ID, row.Number, row.OrderedBy, row.OrderedByName = 0, nextNumber("PO"), user.ID, user.Username
-	if row.Status != "draft" && row.OrderDate == nil {
-		now := time.Now()
-		row.OrderDate = &now
-	}
-	for i := range row.Lines {
-		row.Lines[i].ID, row.Lines[i].PurchaseOrderID = 0, 0
-	}
-	if err := h.db.Create(&row).Error; err != nil {
-		conflictOrServer(w, err)
+	if isMCPMutation(r) && row.Status != "draft" {
+		badRequest(w, "MCP/KI darf Bestellungen nur als Entwurf anlegen; Versand und Bestätigung erfordern eine getrennte Freigabe")
 		return
 	}
-	h.activity(r, "purchase_order", row.ID, "created", row.Number)
+	user := auth.CurrentUser(r)
+	err := h.db.Transaction(func(tx *gorm.DB) error {
+		idempotency, replay, err := beginIdempotentMutation(tx, r, "order_create", row)
+		if err != nil {
+			return err
+		}
+		if replay != nil {
+			return json.Unmarshal(replay, &row)
+		}
+		if err := validateOrderReferences(tx, &row); err != nil {
+			return err
+		}
+		row.ID, row.Number, row.OrderedBy, row.OrderedByName = 0, nextNumber("PO"), user.ID, user.Username
+		row.CreatedAt, row.UpdatedAt = time.Time{}, time.Time{}
+		row.Supplier = nil
+		if row.Status != "draft" && row.OrderDate == nil {
+			now := time.Now()
+			row.OrderDate = &now
+		}
+		for i := range row.Lines {
+			row.Lines[i].ID, row.Lines[i].PurchaseOrderID = 0, 0
+			row.Lines[i].Product = nil
+			row.Lines[i].ReceivedQuantity = 0
+		}
+		if err := tx.Create(&row).Error; err != nil {
+			return err
+		}
+		var persisted models.PurchaseOrder
+		if err := tx.Preload("Lines").First(&persisted, row.ID).Error; err != nil {
+			return err
+		}
+		row = persisted
+		if err := auditOrderMutation(tx, r, "created", nil, row); err != nil {
+			return err
+		}
+		return completeIdempotentMutation(tx, idempotency, http.StatusCreated, row)
+	})
+	if err != nil {
+		writeProcurementFlowError(w, err)
+		return
+	}
 	writeJSON(w, http.StatusCreated, row)
 }
 
@@ -1866,16 +1969,12 @@ func (h *Handler) updateOrder(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var row models.PurchaseOrder
-	if err := h.db.First(&row, id).Error; err != nil {
-		notFound(w)
-		return
-	}
 	var input struct {
 		Status              string     `json:"status"`
 		SupplierOrderNumber string     `json:"supplierOrderNumber"`
 		ExpectedDelivery    *time.Time `json:"expectedDelivery"`
 		Notes               string     `json:"notes"`
+		ExpectedUpdatedAt   *time.Time `json:"expectedUpdatedAt"`
 	}
 	if !decode(w, r, &input) {
 		return
@@ -1885,16 +1984,59 @@ func (h *Handler) updateOrder(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, "Ungültiger Bestellstatus")
 		return
 	}
-	row.Status, row.SupplierOrderNumber, row.ExpectedDelivery, row.Notes = input.Status, normalizeSupplierOrderNumber(input.SupplierOrderNumber), input.ExpectedDelivery, input.Notes
-	if input.Status == "sent" && row.OrderDate == nil {
-		now := time.Now()
-		row.OrderDate = &now
-	}
-	if err := h.db.Save(&row).Error; err != nil {
-		serverError(w, err)
+	if len([]rune(input.SupplierOrderNumber)) > 120 {
+		badRequest(w, "Lieferanten-Bestellnummer darf maximal 120 Zeichen lang sein")
 		return
 	}
-	h.activity(r, "purchase_order", row.ID, "updated", fmt.Sprintf("status=%s supplier_order_number=%s", input.Status, row.SupplierOrderNumber))
+	var row models.PurchaseOrder
+	err := h.db.Transaction(func(tx *gorm.DB) error {
+		idempotency, replay, err := beginIdempotentMutation(tx, r, fmt.Sprintf("order_update:%d", id), input)
+		if err != nil {
+			return err
+		}
+		if replay != nil {
+			return json.Unmarshal(replay, &row)
+		}
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Preload("Lines").First(&row, id).Error; err != nil {
+			return err
+		}
+		if err := validateExpectedUpdate(row.UpdatedAt, input.ExpectedUpdatedAt, isMCPMutation(r)); err != nil {
+			return err
+		}
+		if !orderTransitionAllowed(row.Status, input.Status) {
+			return &receiptFlowError{status: http.StatusConflict, code: "invalid_order_transition", message: "Dieser Bestellstatus-Übergang ist nicht zulässig"}
+		}
+		if isMCPMutation(r) && row.Status == "submission_unknown" {
+			return &receiptFlowError{status: http.StatusForbidden, code: "external_verification_required", message: "Unklare externe Bestellung muss manuell geprüft werden"}
+		}
+		before := row
+		row.Status, row.SupplierOrderNumber, row.ExpectedDelivery, row.Notes = input.Status, normalizeSupplierOrderNumber(input.SupplierOrderNumber), input.ExpectedDelivery, input.Notes
+		if input.Status == "sent" && row.OrderDate == nil {
+			now := time.Now()
+			row.OrderDate = &now
+		}
+		row.Lines = nil
+		row.Supplier = nil
+		row.UpdatedAt = time.Time{}
+		if err := tx.Save(&row).Error; err != nil {
+			return err
+		}
+		if err := tx.Preload("Lines").First(&row, id).Error; err != nil {
+			return err
+		}
+		action := "updated"
+		if before.Status != row.Status {
+			action = row.Status
+		}
+		if err := auditOrderMutation(tx, r, action, before, row); err != nil {
+			return err
+		}
+		return completeIdempotentMutation(tx, idempotency, http.StatusOK, row)
+	})
+	if err != nil {
+		writeProcurementFlowError(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, row)
 }
 

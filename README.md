@@ -1,5 +1,14 @@
 # ProcurementCore
 
+Release `1.0.51` schützt Bestellanlage und Statuswechsel mit erneuter Prüfung
+aktiver Lieferanten/Produkte, Versionssperre, transaktionalem Audit und
+dauerhafter Idempotenz. MCP/KI darf Bestellungen nur als Entwurf anlegen;
+Versand, Bestätigung und Storno laufen als separate, bestätigte Statuswechsel.
+Der Status `sent` verschickt keine Bestellung an einen Lieferanten. Die
+Core-API weist rückwärts gerichtete Übergänge ab und setzt beim Anlegen
+gelieferte Mengen unabhängig von Eingabedaten auf null.
+
+
 Release `1.0.50` schützt Bedarfsentwürfe und ihre Einreichung mit
 Versionsprüfung unter Datensatzsperre, dauerhafter Idempotenz und
 transaktionalem Audit. Produkt- und Lieferantenreferenzen werden unmittelbar
