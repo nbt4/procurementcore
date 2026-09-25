@@ -1,5 +1,15 @@
 # ProcurementCore
 
+Release `1.0.48` schützt Produktanlage und Produktänderung durch transaktionales
+Audit und dauerhafte Idempotenz. `PUT /products/:id` verlangt bei MCP/KI die
+exakte `expectedUpdatedAt`-Version; unter Datensatzsperre werden Kategorie und
+offene Bestellungen/Bedarfe vor einer Deaktivierung erneut geprüft. `active=false`
+archiviert das Produkt ohne Historienverlust, `active=true` stellt es wieder her.
+Ein `initialOffer` wird zusammen mit Produkt und Preishistorie atomar angelegt;
+ein ungültiger Lieferant rollt den gesamten Vorgang zurück.
+Der isolierte PostgreSQL-Test läuft mit
+`PROCUREMENT_TEST_DATABASE_URL=postgres://.../procurement_test go test ./internal/api`.
+
 Release `1.0.47` speichert Kategorien einschließlich vollständigem
 Parameter-Schema transaktional mit Aktivität und Audit-Herkunft. MCP/KI-Aufrufe
 benötigen einen Idempotenzschlüssel; Änderungen benötigen außerdem die exakte

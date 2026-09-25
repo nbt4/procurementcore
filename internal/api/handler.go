@@ -747,6 +747,12 @@ func validateProduct(row *models.Product) string {
 	if row.SKU == "" || row.Name == "" {
 		return "SKU und Name sind erforderlich"
 	}
+	if len([]rune(row.SKU)) > 80 || len([]rune(row.Name)) > 240 || len([]rune(row.Unit)) > 30 || len([]rune(row.Manufacturer)) > 180 || len([]rune(row.Model)) > 180 {
+		return "Ein Produktfeld überschreitet die maximal zulässige Länge"
+	}
+	if row.ReorderPoint < 0 || row.TargetStock < 0 || math.IsNaN(row.ReorderPoint) || math.IsNaN(row.TargetStock) || math.IsInf(row.ReorderPoint, 0) || math.IsInf(row.TargetStock, 0) {
+		return "Bestandsgrenzen müssen endliche, nicht-negative Zahlen sein"
+	}
 	if len(row.Parameters) == 0 {
 		row.Parameters = json.RawMessage("{}")
 	}
@@ -766,21 +772,112 @@ func validateProduct(row *models.Product) string {
 }
 
 func (h *Handler) createProduct(w http.ResponseWriter, r *http.Request) {
-	var row models.Product
-	if !decode(w, r, &row) {
+	var input struct {
+		models.Product
+		InitialOffer *models.Offer `json:"initialOffer"`
+	}
+	if !decode(w, r, &input) {
 		return
 	}
+	row := input.Product
 	if msg := validateProduct(&row); msg != "" {
 		badRequest(w, msg)
 		return
 	}
+	if input.InitialOffer != nil {
+		if msg := validateOffer(input.InitialOffer); msg != "" {
+			badRequest(w, msg)
+			return
+		}
+		// The request fingerprint must remain stable across retries.
+		input.InitialOffer.LastCheckedAt = time.Time{}
+	}
 	row.Offers = nil
-	if err := h.db.Create(&row).Error; err != nil {
-		conflictOrServer(w, err)
+	response := struct {
+		models.Product
+		CreatedOffer *models.Offer `json:"createdOffer,omitempty"`
+	}{}
+	err := h.db.Transaction(func(tx *gorm.DB) error {
+		idempotency, replay, err := beginIdempotentMutation(tx, r, "product_create", input)
+		if err != nil {
+			return err
+		}
+		if replay != nil {
+			return json.Unmarshal(replay, &response)
+		}
+		if row.CategoryID != nil {
+			var count int64
+			if err := tx.Model(&models.Category{}).Where("id = ?", *row.CategoryID).Count(&count).Error; err != nil {
+				return err
+			}
+			if count == 0 {
+				return &receiptFlowError{status: http.StatusConflict, code: "category_not_found", message: "Kategorie existiert nicht mehr"}
+			}
+		}
+		if err := tx.Create(&row).Error; err != nil {
+			return err
+		}
+		if input.InitialOffer != nil {
+			var supplierCount int64
+			if err := tx.Model(&models.Supplier{}).Where("id = ? AND active = true", input.InitialOffer.SupplierID).Count(&supplierCount).Error; err != nil {
+				return err
+			}
+			if supplierCount == 0 {
+				return &receiptFlowError{status: http.StatusConflict, code: "supplier_not_found", message: "Aktiver Lieferant existiert nicht mehr"}
+			}
+			offer := *input.InitialOffer
+			offer.ID, offer.ProductID, offer.Supplier = 0, row.ID, nil
+			offer.LastCheckedAt = time.Now()
+			if err := tx.Create(&offer).Error; err != nil {
+				return err
+			}
+			if err := service.RecordPriceAndEvaluateAlerts(tx, &offer); err != nil {
+				return err
+			}
+			response.CreatedOffer = &offer
+		}
+		origin := "UI"
+		if isMCPMutation(r) {
+			origin = "MCP/AI"
+		}
+		changes, err := json.Marshal(map[string]any{"origin": origin, "after": row})
+		if err != nil {
+			return err
+		}
+		user := auth.CurrentUser(r)
+		if err := tx.Exec(`INSERT INTO audit_log (user_id,action,entity_type,entity_id,old_values,new_values,ip_address,user_agent)
+			VALUES (?, 'product.create', 'procurement_product', ?, NULL, ?::jsonb, ?, ?)`, user.ID, strconv.FormatUint(uint64(row.ID), 10), string(changes), requestIP(r), r.UserAgent()).Error; err != nil {
+			return err
+		}
+		if err := tx.Create(&models.Activity{EntityType: "product", EntityID: row.ID, Action: "created", UserID: user.ID, Username: user.Username, Details: "origin=" + origin + " " + row.Name}).Error; err != nil {
+			return err
+		}
+		if response.CreatedOffer != nil {
+			offerChanges, err := json.Marshal(map[string]any{"origin": origin, "after": response.CreatedOffer})
+			if err != nil {
+				return err
+			}
+			if err := tx.Exec(`INSERT INTO audit_log (user_id,action,entity_type,entity_id,old_values,new_values,ip_address,user_agent)
+				VALUES (?, 'offer.create', 'procurement_offer', ?, NULL, ?::jsonb, ?, ?)`, user.ID, strconv.FormatUint(uint64(response.CreatedOffer.ID), 10), string(offerChanges), requestIP(r), r.UserAgent()).Error; err != nil {
+				return err
+			}
+			if err := tx.Create(&models.Activity{EntityType: "offer", EntityID: response.CreatedOffer.ID, Action: "created", UserID: user.ID, Username: user.Username, Details: "origin=" + origin + " product=" + strconv.FormatUint(uint64(row.ID), 10)}).Error; err != nil {
+				return err
+			}
+		}
+		response.Product = row
+		return completeIdempotentMutation(tx, idempotency, http.StatusCreated, response)
+	})
+	if err != nil {
+		var flowErr *receiptFlowError
+		if errors.As(err, &flowErr) {
+			writeProcurementFlowError(w, err)
+		} else {
+			conflictOrServer(w, err)
+		}
 		return
 	}
-	h.activity(r, "product", row.ID, "created", row.Name)
-	writeJSON(w, http.StatusCreated, row)
+	writeJSON(w, http.StatusCreated, response)
 }
 
 func (h *Handler) updateProduct(w http.ResponseWriter, r *http.Request) {
@@ -788,26 +885,98 @@ func (h *Handler) updateProduct(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var existing models.Product
-	if err := h.db.First(&existing, id).Error; err != nil {
-		notFound(w)
-		return
+	var input struct {
+		models.Product
+		ExpectedUpdatedAt *time.Time `json:"expectedUpdatedAt"`
 	}
-	var input models.Product
 	if !decode(w, r, &input) {
 		return
 	}
-	if msg := validateProduct(&input); msg != "" {
+	if msg := validateProduct(&input.Product); msg != "" {
 		badRequest(w, msg)
 		return
 	}
-	input.ID, input.CreatedAt, input.Offers = existing.ID, existing.CreatedAt, nil
-	if err := h.db.Save(&input).Error; err != nil {
-		conflictOrServer(w, err)
+	var updated models.Product
+	err := h.db.Transaction(func(tx *gorm.DB) error {
+		idempotency, replay, err := beginIdempotentMutation(tx, r, fmt.Sprintf("product_update:%d", id), input)
+		if err != nil {
+			return err
+		}
+		if replay != nil {
+			return json.Unmarshal(replay, &updated)
+		}
+		var previous models.Product
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&previous, id).Error; err != nil {
+			return err
+		}
+		if err := validateExpectedUpdate(previous.UpdatedAt, input.ExpectedUpdatedAt, isMCPMutation(r)); err != nil {
+			return err
+		}
+		if input.CategoryID != nil {
+			var categoryCount int64
+			if err := tx.Model(&models.Category{}).Where("id = ?", *input.CategoryID).Count(&categoryCount).Error; err != nil {
+				return err
+			}
+			if categoryCount == 0 {
+				return &receiptFlowError{status: http.StatusConflict, code: "category_not_found", message: "Kategorie existiert nicht mehr"}
+			}
+		}
+		if previous.Active && !input.Active {
+			var openOrders, openRequisitions int64
+			if err := tx.Model(&models.PurchaseOrderLine{}).Joins("JOIN proc_purchase_orders po ON po.id = proc_purchase_order_lines.purchase_order_id").Where("proc_purchase_order_lines.product_id = ? AND po.status NOT IN ?", id, []string{"cancelled", "received"}).Count(&openOrders).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&models.RequisitionLine{}).Joins("JOIN proc_requisitions r ON r.id = proc_requisition_lines.requisition_id").Where("proc_requisition_lines.product_id = ? AND r.status IN ?", id, []string{"draft", "submitted", "approved"}).Count(&openRequisitions).Error; err != nil {
+				return err
+			}
+			if openOrders+openRequisitions > 0 {
+				return &receiptFlowError{status: http.StatusConflict, code: "product_active_references", message: "Produkt wird in offenen Bestellungen oder Bedarfen verwendet und kann noch nicht deaktiviert werden"}
+			}
+		}
+		updated = input.Product
+		updated.ID, updated.CreatedAt = previous.ID, previous.CreatedAt
+		updated.UpdatedAt, updated.Offers, updated.Category = time.Time{}, nil, nil
+		if err := tx.Save(&updated).Error; err != nil {
+			return err
+		}
+		origin := "UI"
+		if isMCPMutation(r) {
+			origin = "MCP/AI"
+		}
+		beforeJSON, err := json.Marshal(previous)
+		if err != nil {
+			return err
+		}
+		changes, err := json.Marshal(map[string]any{"origin": origin, "before": previous, "after": updated})
+		if err != nil {
+			return err
+		}
+		auditAction, activityAction := "product.update", "updated"
+		if previous.Active && !updated.Active {
+			auditAction, activityAction = "product.deactivate", "deactivated"
+		} else if !previous.Active && updated.Active {
+			auditAction, activityAction = "product.reactivate", "reactivated"
+		}
+		user := auth.CurrentUser(r)
+		if err := tx.Exec(`INSERT INTO audit_log (user_id,action,entity_type,entity_id,old_values,new_values,ip_address,user_agent)
+			VALUES (?, ?, 'procurement_product', ?, ?::jsonb, ?::jsonb, ?, ?)`, user.ID, auditAction, strconv.FormatUint(uint64(id), 10), string(beforeJSON), string(changes), requestIP(r), r.UserAgent()).Error; err != nil {
+			return err
+		}
+		if err := tx.Create(&models.Activity{EntityType: "product", EntityID: id, Action: activityAction, UserID: user.ID, Username: user.Username, Details: "origin=" + origin + " " + updated.Name}).Error; err != nil {
+			return err
+		}
+		return completeIdempotentMutation(tx, idempotency, http.StatusOK, updated)
+	})
+	if err != nil {
+		var flowErr *receiptFlowError
+		if errors.As(err, &flowErr) || errors.Is(err, gorm.ErrRecordNotFound) {
+			writeProcurementFlowError(w, err)
+		} else {
+			conflictOrServer(w, err)
+		}
 		return
 	}
-	h.activity(r, "product", input.ID, "updated", input.Name)
-	writeJSON(w, http.StatusOK, input)
+	writeJSON(w, http.StatusOK, updated)
 }
 
 func (h *Handler) deleteProduct(w http.ResponseWriter, r *http.Request) {
