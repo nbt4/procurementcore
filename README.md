@@ -1,5 +1,14 @@
 # ProcurementCore
 
+Release `1.0.50` schützt Bedarfsentwürfe und ihre Einreichung mit
+Versionsprüfung unter Datensatzsperre, dauerhafter Idempotenz und
+transaktionalem Audit. Produkt- und Lieferantenreferenzen werden unmittelbar
+vor der Speicherung erneut geprüft. API-Antworten enthalten die tatsächlich
+gespeicherte Version. Die UI kann weiterhin Entwürfe anlegen und einreichen;
+MCP/KI-Aufrufe benötigen bei Änderungen `expectedUpdatedAt`. Der isolierte
+PostgreSQL-Test läuft mit
+`PROCUREMENT_TEST_DATABASE_URL=postgres://.../procurement_test go test ./internal/api`.
+
 Release `1.0.49` schützt Anlage und Änderung von Lieferantenangeboten mit
 Versionsprüfung, transaktionalem Audit und dauerhafter Idempotenz. Preisänderungen
 schreiben die Preishistorie in derselben Transaktion. `active=false` archiviert

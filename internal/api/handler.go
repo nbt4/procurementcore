@@ -1384,19 +1384,79 @@ func (h *Handler) getRequisition(w http.ResponseWriter, r *http.Request) {
 
 func validateRequisition(row *models.Requisition) string {
 	row.Title = strings.TrimSpace(row.Title)
+	row.CostCenter = strings.TrimSpace(row.CostCenter)
+	row.Justification = strings.TrimSpace(row.Justification)
 	if row.Title == "" || len(row.Lines) == 0 {
 		return "Titel und mindestens eine Position sind erforderlich"
 	}
+	if len([]rune(row.Title)) > 240 || len([]rune(row.CostCenter)) > 80 {
+		return "Titel oder Kostenstelle ist zu lang"
+	}
+	row.EstimatedTotalCents = 0
 	for i := range row.Lines {
-		if row.Lines[i].Description == "" || row.Lines[i].Quantity <= 0 {
+		line := &row.Lines[i]
+		line.Description = strings.TrimSpace(line.Description)
+		line.Unit = strings.TrimSpace(line.Unit)
+		line.PurchaseURL = strings.TrimSpace(line.PurchaseURL)
+		if line.Description == "" || line.Quantity <= 0 || math.IsNaN(line.Quantity) || math.IsInf(line.Quantity, 0) {
 			return "Jede Position benötigt Beschreibung und positive Menge"
 		}
-		if row.Lines[i].Unit == "" {
-			row.Lines[i].Unit = "Stk."
+		if len([]rune(line.Description)) > 500 || len([]rune(line.Unit)) > 30 || len(line.PurchaseURL) > 2000 || line.EstimatedPriceCents < 0 {
+			return "Eine Position enthält ungültige Länge oder einen negativen Preis"
+		}
+		if line.Quantity > 1e9 || line.EstimatedPriceCents > 1e9 || float64(row.EstimatedTotalCents)+line.Quantity*float64(line.EstimatedPriceCents) > 9e18 {
+			return "Menge oder Schätzwert ist zu groß"
+		}
+		row.EstimatedTotalCents += int64(line.Quantity * float64(line.EstimatedPriceCents))
+		if line.Unit == "" {
+			line.Unit = "Stk."
 		}
 	}
-	row.EstimatedTotalCents = service.RequisitionTotal(row.Lines)
 	return ""
+}
+
+func validateRequisitionReferences(tx *gorm.DB, row *models.Requisition) error {
+	for _, line := range row.Lines {
+		if line.ProductID != nil {
+			var count int64
+			if err := tx.Model(&models.Product{}).Where("id = ? AND active = true", *line.ProductID).Count(&count).Error; err != nil {
+				return err
+			}
+			if count != 1 {
+				return &receiptFlowError{status: http.StatusConflict, code: "product_inactive", message: "Bedarfsposition verweist auf ein fehlendes oder archiviertes Produkt"}
+			}
+		}
+		if line.PreferredSupplierID != nil {
+			var count int64
+			if err := tx.Model(&models.Supplier{}).Where("id = ? AND active = true", *line.PreferredSupplierID).Count(&count).Error; err != nil {
+				return err
+			}
+			if count != 1 {
+				return &receiptFlowError{status: http.StatusConflict, code: "supplier_inactive", message: "Bedarfsposition verweist auf einen fehlenden oder inaktiven Lieferanten"}
+			}
+		}
+	}
+	return nil
+}
+
+func auditRequisitionMutation(tx *gorm.DB, r *http.Request, action string, before any, after models.Requisition) error {
+	user := auth.CurrentUser(r)
+	origin := "UI"
+	if isMCPMutation(r) {
+		origin = "MCP/AI"
+	}
+	beforeJSON, err := json.Marshal(before)
+	if err != nil {
+		return err
+	}
+	afterJSON, err := json.Marshal(map[string]any{"origin": origin, "requisition": after})
+	if err != nil {
+		return err
+	}
+	if err := tx.Exec(`INSERT INTO audit_log (user_id,action,entity_type,entity_id,old_values,new_values,ip_address,user_agent) VALUES (?, ?, 'procurement_requisition', ?, ?::jsonb, ?::jsonb, ?, ?)`, user.ID, "requisition."+action, strconv.FormatUint(uint64(after.ID), 10), string(beforeJSON), string(afterJSON), requestIP(r), r.UserAgent()).Error; err != nil {
+		return err
+	}
+	return tx.Create(&models.Activity{EntityType: "requisition", EntityID: after.ID, Action: action, UserID: user.ID, Username: user.Username, Details: "origin=" + origin + " " + after.Number}).Error
 }
 
 func (h *Handler) createRequisition(w http.ResponseWriter, r *http.Request) {
@@ -1409,16 +1469,42 @@ func (h *Handler) createRequisition(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user := auth.CurrentUser(r)
-	row.ID, row.Number, row.Status = 0, nextNumber("BAN"), "draft"
-	row.RequesterID, row.RequesterName = user.ID, user.Username
-	for i := range row.Lines {
-		row.Lines[i].ID, row.Lines[i].RequisitionID = 0, 0
-	}
-	if err := h.db.Create(&row).Error; err != nil {
-		conflictOrServer(w, err)
+	err := h.db.Transaction(func(tx *gorm.DB) error {
+		idempotency, replay, err := beginIdempotentMutation(tx, r, "requisition_create", row)
+		if err != nil {
+			return err
+		}
+		if replay != nil {
+			return json.Unmarshal(replay, &row)
+		}
+		row.ID, row.Number, row.Status = 0, nextNumber("BAN"), "draft"
+		row.RequesterID, row.RequesterName = user.ID, user.Username
+		row.ApprovedBy, row.ApprovedByName, row.DecisionNote, row.SubmittedAt, row.DecidedAt = nil, "", "", nil, nil
+		row.CreatedAt, row.UpdatedAt = time.Time{}, time.Time{}
+		for i := range row.Lines {
+			row.Lines[i].ID, row.Lines[i].RequisitionID = 0, 0
+			row.Lines[i].Product = nil
+		}
+		if err := validateRequisitionReferences(tx, &row); err != nil {
+			return err
+		}
+		if err := tx.Create(&row).Error; err != nil {
+			return err
+		}
+		var persisted models.Requisition
+		if err := tx.Preload("Lines").First(&persisted, row.ID).Error; err != nil {
+			return err
+		}
+		row = persisted
+		if err := auditRequisitionMutation(tx, r, "created", nil, row); err != nil {
+			return err
+		}
+		return completeIdempotentMutation(tx, idempotency, http.StatusCreated, row)
+	})
+	if err != nil {
+		writeProcurementFlowError(w, err)
 		return
 	}
-	h.activity(r, "requisition", row.ID, "created", row.Number)
 	writeJSON(w, http.StatusCreated, row)
 }
 
@@ -1428,25 +1514,42 @@ func (h *Handler) updateRequisition(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user := auth.CurrentUser(r)
-	var existing models.Requisition
-	if err := h.db.First(&existing, id).Error; err != nil {
-		notFound(w)
-		return
+	var input struct {
+		models.Requisition
+		ExpectedUpdatedAt *time.Time `json:"expectedUpdatedAt"`
 	}
-	if existing.Status != "draft" || (!user.IsAdmin && existing.RequesterID != user.ID) {
-		forbidden(w)
-		return
-	}
-	var input models.Requisition
 	if !decode(w, r, &input) {
 		return
 	}
-	if msg := validateRequisition(&input); msg != "" {
+	if msg := validateRequisition(&input.Requisition); msg != "" {
 		badRequest(w, msg)
 		return
 	}
+	var existing models.Requisition
 	err := h.db.Transaction(func(tx *gorm.DB) error {
+		idempotency, replay, err := beginIdempotentMutation(tx, r, fmt.Sprintf("requisition_update:%d", id), input)
+		if err != nil {
+			return err
+		}
+		if replay != nil {
+			return json.Unmarshal(replay, &existing)
+		}
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Preload("Lines").First(&existing, id).Error; err != nil {
+			return err
+		}
+		if existing.Status != "draft" || (!user.IsAdmin && existing.RequesterID != user.ID) {
+			return &receiptFlowError{status: http.StatusForbidden, code: "requisition_not_editable", message: "Nur eigene Entwürfe können geändert werden"}
+		}
+		if err := validateExpectedUpdate(existing.UpdatedAt, input.ExpectedUpdatedAt, isMCPMutation(r)); err != nil {
+			return err
+		}
+		if err := validateRequisitionReferences(tx, &input.Requisition); err != nil {
+			return err
+		}
+		before := existing
 		existing.Title, existing.CostCenter, existing.Justification, existing.NeededBy, existing.EstimatedTotalCents = input.Title, input.CostCenter, input.Justification, input.NeededBy, input.EstimatedTotalCents
+		existing.Lines = nil
+		existing.UpdatedAt = time.Time{}
 		if err := tx.Save(&existing).Error; err != nil {
 			return err
 		}
@@ -1455,15 +1558,24 @@ func (h *Handler) updateRequisition(w http.ResponseWriter, r *http.Request) {
 		}
 		for i := range input.Lines {
 			input.Lines[i].ID, input.Lines[i].RequisitionID = 0, id
+			input.Lines[i].Product = nil
 		}
-		return tx.Create(&input.Lines).Error
+		if err := tx.Create(&input.Lines).Error; err != nil {
+			return err
+		}
+		if err := tx.Preload("Lines").First(&existing, id).Error; err != nil {
+			return err
+		}
+		if err := auditRequisitionMutation(tx, r, "updated", before, existing); err != nil {
+			return err
+		}
+		return completeIdempotentMutation(tx, idempotency, http.StatusOK, existing)
 	})
 	if err != nil {
-		serverError(w, err)
+		writeProcurementFlowError(w, err)
 		return
 	}
-	h.activity(r, "requisition", id, "updated", existing.Number)
-	h.getRequisition(w, r)
+	writeJSON(w, http.StatusOK, existing)
 }
 
 func (h *Handler) submitRequisition(w http.ResponseWriter, r *http.Request) {
@@ -1472,22 +1584,56 @@ func (h *Handler) submitRequisition(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user := auth.CurrentUser(r)
+	var input struct {
+		ExpectedUpdatedAt *time.Time `json:"expectedUpdatedAt"`
+	}
+	if !decode(w, r, &input) {
+		return
+	}
 	var row models.Requisition
-	if err := h.db.First(&row, id).Error; err != nil {
-		notFound(w)
+	err := h.db.Transaction(func(tx *gorm.DB) error {
+		idempotency, replay, err := beginIdempotentMutation(tx, r, fmt.Sprintf("requisition_submit:%d", id), input)
+		if err != nil {
+			return err
+		}
+		if replay != nil {
+			return json.Unmarshal(replay, &row)
+		}
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Preload("Lines").First(&row, id).Error; err != nil {
+			return err
+		}
+		if row.Status != "draft" || (!user.IsAdmin && row.RequesterID != user.ID) {
+			return &receiptFlowError{status: http.StatusConflict, code: "requisition_not_draft", message: "Nur eigene Entwürfe können eingereicht werden"}
+		}
+		if err := validateExpectedUpdate(row.UpdatedAt, input.ExpectedUpdatedAt, isMCPMutation(r)); err != nil {
+			return err
+		}
+		if msg := validateRequisition(&row); msg != "" {
+			return &receiptFlowError{status: http.StatusBadRequest, code: "invalid_requisition", message: msg}
+		}
+		if err := validateRequisitionReferences(tx, &row); err != nil {
+			return err
+		}
+		before := row
+		now := time.Now()
+		row.Status, row.SubmittedAt = "submitted", &now
+		row.Lines = nil
+		row.UpdatedAt = time.Time{}
+		if err := tx.Save(&row).Error; err != nil {
+			return err
+		}
+		if err := tx.Preload("Lines").First(&row, id).Error; err != nil {
+			return err
+		}
+		if err := auditRequisitionMutation(tx, r, "submitted", before, row); err != nil {
+			return err
+		}
+		return completeIdempotentMutation(tx, idempotency, http.StatusOK, row)
+	})
+	if err != nil {
+		writeProcurementFlowError(w, err)
 		return
 	}
-	if row.Status != "draft" || (!user.IsAdmin && row.RequesterID != user.ID) {
-		badRequest(w, "Nur eigene Entwürfe können eingereicht werden")
-		return
-	}
-	now := time.Now()
-	row.Status, row.SubmittedAt = "submitted", &now
-	if err := h.db.Save(&row).Error; err != nil {
-		serverError(w, err)
-		return
-	}
-	h.activity(r, "requisition", id, "submitted", row.Number)
 	writeJSON(w, http.StatusOK, row)
 }
 
