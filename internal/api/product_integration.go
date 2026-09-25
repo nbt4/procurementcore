@@ -5,11 +5,16 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"procurementcore/internal/auth"
 	"procurementcore/internal/models"
+
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type warehouseProductCandidate struct {
@@ -272,7 +277,8 @@ func (h *Handler) linkWarehouseProduct(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input struct {
-		WarehouseProductID int64 `json:"warehouseProductId"`
+		WarehouseProductID int64      `json:"warehouseProductId"`
+		ExpectedUpdatedAt  *time.Time `json:"expectedUpdatedAt"`
 	}
 	if !decode(w, r, &input) {
 		return
@@ -281,21 +287,107 @@ func (h *Handler) linkWarehouseProduct(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, "Warehouse-Produkt fehlt")
 		return
 	}
-	var procCount, warehouseCount int64
-	h.db.Model(&models.Product{}).Where("id=? AND active=TRUE", id).Count(&procCount)
-	h.db.Raw("SELECT COUNT(*) FROM products WHERE productID=? AND lifecycle_status='active'", input.WarehouseProductID).Scan(&warehouseCount)
-	if procCount == 0 || warehouseCount == 0 {
-		badRequest(w, "Produkt wurde nicht gefunden oder ist archiviert")
-		return
-	}
 	user := auth.CurrentUser(r)
-	link := models.CoreProductLink{ProcurementProductID: id, WarehouseProductID: input.WarehouseProductID, LinkMethod: "manual", LinkedBy: user.ID, LinkedByName: user.Username}
-	if err := h.db.Create(&link).Error; err != nil {
-		conflictOrServer(w, err)
+	var link models.CoreProductLink
+	err := h.db.Transaction(func(tx *gorm.DB) error {
+		idempotency, replay, err := beginIdempotentMutation(tx, r, fmt.Sprintf("product_link:%d", id), input)
+		if err != nil {
+			return err
+		}
+		if replay != nil {
+			return json.Unmarshal(replay, &link)
+		}
+		var product models.Product
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&product, id).Error; err != nil {
+			return err
+		}
+		if !product.Active {
+			return &receiptFlowError{status: http.StatusConflict, code: "product_inactive", message: "Beschaffungsprodukt ist archiviert"}
+		}
+		var warehouseID int64
+		if err := tx.Raw(`SELECT productID FROM products WHERE productID=? AND lifecycle_status='active' FOR UPDATE`, input.WarehouseProductID).Scan(&warehouseID).Error; err != nil {
+			return err
+		}
+		if warehouseID != input.WarehouseProductID {
+			return &receiptFlowError{status: http.StatusConflict, code: "warehouse_product_inactive", message: "Warehouse-Produkt fehlt oder ist archiviert"}
+		}
+		lookup := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("procurement_product_id=?", id).Limit(1).Find(&link)
+		if lookup.Error != nil {
+			return lookup.Error
+		}
+		exists := lookup.RowsAffected == 1
+		version := product.UpdatedAt
+		if exists {
+			version = link.UpdatedAt
+		}
+		if err := validateExpectedUpdate(version, input.ExpectedUpdatedAt, isMCPMutation(r)); err != nil {
+			return err
+		}
+		if exists && link.WarehouseProductID == input.WarehouseProductID {
+			return completeIdempotentMutation(tx, idempotency, http.StatusOK, link)
+		}
+		var taken int64
+		if err := tx.Model(&models.CoreProductLink{}).Where("warehouse_product_id=? AND procurement_product_id<>?", input.WarehouseProductID, id).Count(&taken).Error; err != nil {
+			return err
+		}
+		if taken > 0 {
+			return &receiptFlowError{status: http.StatusConflict, code: "warehouse_product_already_linked", message: "Warehouse-Produkt ist bereits mit einem anderen Beschaffungsprodukt verknüpft"}
+		}
+		var before any
+		action := "created"
+		if exists {
+			before = link
+			action = "updated"
+			var receipts, openOrders int64
+			if err := tx.Model(&models.Receipt{}).Joins("JOIN proc_purchase_order_lines pol ON pol.id=proc_receipts.purchase_order_line_id").Where("pol.product_id=?", id).Count(&receipts).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&models.PurchaseOrderLine{}).Joins("JOIN proc_purchase_orders po ON po.id=proc_purchase_order_lines.purchase_order_id").Where("proc_purchase_order_lines.product_id=? AND po.status IN ?", id, []string{"draft", "sent", "confirmed", "partially_received"}).Count(&openOrders).Error; err != nil {
+				return err
+			}
+			if receipts > 0 || openOrders > 0 {
+				return &receiptFlowError{status: http.StatusConflict, code: "product_link_in_use", message: "Wareneingänge oder offene Bestellungen verhindern eine Änderung der Produktverknüpfung"}
+			}
+			link.WarehouseProductID = input.WarehouseProductID
+			link.LinkedBy, link.LinkedByName = user.ID, user.Username
+			link.UpdatedAt = time.Time{}
+			if err := tx.Save(&link).Error; err != nil {
+				return err
+			}
+		} else {
+			link = models.CoreProductLink{ProcurementProductID: id, WarehouseProductID: input.WarehouseProductID, LinkMethod: "manual", LinkedBy: user.ID, LinkedByName: user.Username}
+			if err := tx.Create(&link).Error; err != nil {
+				return err
+			}
+		}
+		if err := tx.First(&link, link.ID).Error; err != nil {
+			return err
+		}
+		origin := "UI"
+		if isMCPMutation(r) {
+			origin = "MCP/AI"
+		}
+		oldJSON, err := json.Marshal(before)
+		if err != nil {
+			return err
+		}
+		newJSON, err := json.Marshal(map[string]any{"origin": origin, "link": link})
+		if err != nil {
+			return err
+		}
+		if err := tx.Exec(`INSERT INTO audit_log (user_id,action,entity_type,entity_id,old_values,new_values,ip_address,user_agent) VALUES (?, ?, 'procurement_product_link', ?, ?::jsonb, ?::jsonb, ?, ?)`, user.ID, "product_link."+action, strconv.FormatUint(uint64(link.ID), 10), string(oldJSON), string(newJSON), requestIP(r), r.UserAgent()).Error; err != nil {
+			return err
+		}
+		if err := tx.Create(&models.Activity{EntityType: "product_link", EntityID: link.ID, Action: action, UserID: user.ID, Username: user.Username, Details: fmt.Sprintf("origin=%s procurement=%d warehouse=%d", origin, id, input.WarehouseProductID)}).Error; err != nil {
+			return err
+		}
+		return completeIdempotentMutation(tx, idempotency, http.StatusOK, link)
+	})
+	if err != nil {
+		writeProcurementFlowError(w, err)
 		return
 	}
-	h.activity(r, "product_link", link.ID, "created", fmt.Sprintf("procurement=%d warehouse=%d", id, input.WarehouseProductID))
-	writeJSON(w, http.StatusCreated, link)
+	writeJSON(w, http.StatusOK, link)
 }
 
 func (h *Handler) unlinkWarehouseProduct(w http.ResponseWriter, r *http.Request) {

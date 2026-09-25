@@ -1,5 +1,13 @@
 # ProcurementCore
 
+Release `1.0.53` verknüpft bestehende Procurement- und Warehouse-Produkte
+versionsgesichert. Anlage und Neuverknüpfung sperren beide Produktdatensätze,
+prüfen aktive und eindeutige Referenzen und speichern Link, Audit, Aktivität
+und Idempotenzbeleg atomar. Vorhandene Wareneingänge oder offene Bestellungen
+blockieren eine Neuverknüpfung. Für MCP/KI ist `expectedUpdatedAt` verpflichtend;
+die bestehende UI kann Links weiter ohne Versionsangabe anlegen.
+
+
 Release `1.0.52` schreibt Entscheidungen zu Bedarfsanforderungen sowie
 Wareneingänge mit Vorher-/Nachher-Werten, MCP/KI-Herkunft und Aktivität direkt
 in der jeweiligen Datenbanktransaktion. Schlägt der Audit-Eintrag fehl, wird
