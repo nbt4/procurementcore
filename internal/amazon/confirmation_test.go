@@ -47,3 +47,20 @@ func TestConfirmationBasicCredentials(t *testing.T) {
 		t.Fatal("basic credentials validation mismatch")
 	}
 }
+
+func TestConfirmationCXMLCredentials(t *testing.T) {
+	client := &Client{cfg: Config{FromIdentity: "buyer", SharedSecret: "secret"}}
+	message := `<cXML><Header><To><Credential domain="NetworkID"><Identity>buyer</Identity></Credential></To><Sender><Credential domain="NetworkID"><Identity>Amazon</Identity><SharedSecret>secret</SharedSecret></Credential></Sender></Header></cXML>`
+	if !client.VerifyConfirmationCXML([]byte(message)) {
+		t.Fatal("valid cXML credentials rejected")
+	}
+	if client.VerifyConfirmationCXML([]byte(strings.Replace(message, "<SharedSecret>secret</SharedSecret>", "<SharedSecret>wrong</SharedSecret>", 1))) {
+		t.Fatal("wrong secret accepted")
+	}
+	if client.VerifyConfirmationCXML([]byte(strings.Replace(message, "<Identity>buyer</Identity>", "<Identity>other</Identity>", 1))) {
+		t.Fatal("wrong identity accepted")
+	}
+	if client.VerifyConfirmationCXML([]byte(strings.Replace(message, "<SharedSecret>secret</SharedSecret>", "", 1))) {
+		t.Fatal("missing secret accepted")
+	}
+}

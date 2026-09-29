@@ -80,6 +80,13 @@ func TestAmazonConfirmationReconcilesSplitOrdersAndCancellation(t *testing.T) {
 	if w := call("event-1", "303-1111111-1111111", "detail", accepted, true); w.Code != http.StatusOK {
 		t.Fatalf("first confirmation: %d %s", w.Code, w.Body.String())
 	}
+	cxmlConfirmation := `<cXML payloadID="event-1"><Header><From><Credential domain="NetworkID"><Identity>Amazon</Identity></Credential></From><To><Credential domain="NetworkID"><Identity>buyer</Identity></Credential></To><Sender><Credential domain="NetworkID"><Identity>Amazon</Identity><SharedSecret>secret</SharedSecret></Credential></Sender></Header><Request><ConfirmationRequest><ConfirmationHeader confirmID="303-1111111-1111111" operation="new" type="detail" noticeDate="2026-09-29T12:00:00Z"/><OrderReference orderID="PO-TEST-1"><DocumentReference payloadID="outgoing-1"/></OrderReference>` + accepted + `</ConfirmationRequest></Request></cXML>`
+	cxmlRequest := httptest.NewRequest(http.MethodPost, "/api/v1/amazon/confirmation", strings.NewReader(cxmlConfirmation))
+	cxmlResponse := httptest.NewRecorder()
+	h.HandleAmazonConfirmation(cxmlResponse, cxmlRequest)
+	if cxmlResponse.Code != http.StatusOK {
+		t.Fatalf("cXML authentication: %d %s", cxmlResponse.Code, cxmlResponse.Body.String())
+	}
 	if w := call("event-1", "303-1111111-1111111", "detail", accepted, true); w.Code != http.StatusOK {
 		t.Fatalf("replay: %d", w.Code)
 	}
@@ -143,6 +150,13 @@ func TestAmazonConfirmationReconcilesSplitOrdersAndCancellation(t *testing.T) {
 	h.HandleAmazonShipment(shipmentResponse, shipmentRequest)
 	if shipmentResponse.Code != http.StatusOK {
 		t.Fatalf("shipment: %d %s", shipmentResponse.Code, shipmentResponse.Body.String())
+	}
+	cxmlShipment := strings.Replace(shipmentBody, "</Header>", `<Sender><Credential domain="NetworkId"><Identity>Amazon</Identity><SharedSecret>secret</SharedSecret></Credential></Sender></Header>`, 1)
+	cxmlShipmentRequest := httptest.NewRequest(http.MethodPost, "/api/v1/amazon/shipment", strings.NewReader(cxmlShipment))
+	cxmlShipmentResponse := httptest.NewRecorder()
+	h.HandleAmazonShipment(cxmlShipmentResponse, cxmlShipmentRequest)
+	if cxmlShipmentResponse.Code != http.StatusOK {
+		t.Fatalf("shipment cXML authentication: %d %s", cxmlShipmentResponse.Code, cxmlShipmentResponse.Body.String())
 	}
 	if err := db.First(&order2, order2.ID).Error; err != nil {
 		t.Fatal(err)

@@ -27,18 +27,18 @@ func writeAmazonConfirmationResponse(w http.ResponseWriter) {
 }
 
 // HandleAmazonConfirmation receives Amazon's optional cXML Order Confirmation.
-// HTTP Basic uses the purchasing system identity and secret configured in Amazon.
+// Amazon can send HTTP Basic or credentials inside the cXML Header.
 func (h *Handler) HandleAmazonConfirmation(w http.ResponseWriter, r *http.Request) {
-	username, password, ok := r.BasicAuth()
-	if h.amazon == nil || !ok || !h.amazon.VerifyConfirmationCredentials(username, password) {
-		w.Header().Set("WWW-Authenticate", `Basic realm="ProcurementCore Amazon confirmation"`)
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	data, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "Confirmation too large", http.StatusRequestEntityTooLarge)
+		return
+	}
+	username, password, basic := r.BasicAuth()
+	if h.amazon == nil || !(basic && h.amazon.VerifyConfirmationCredentials(username, password)) && !h.amazon.VerifyConfirmationCXML(data) {
+		w.Header().Set("WWW-Authenticate", `Basic realm="ProcurementCore Amazon confirmation"`)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 	confirmation, err := amazon.ParseConfirmation(data, h.amazon.BuyerIdentity())
@@ -58,16 +58,16 @@ func (h *Handler) HandleAmazonConfirmation(w http.ResponseWriter, r *http.Reques
 }
 
 func (h *Handler) HandleAmazonShipment(w http.ResponseWriter, r *http.Request) {
-	username, password, ok := r.BasicAuth()
-	if h.amazon == nil || !ok || !h.amazon.VerifyConfirmationCredentials(username, password) {
-		w.Header().Set("WWW-Authenticate", `Basic realm="ProcurementCore Amazon shipment"`)
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	data, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "Shipment too large", http.StatusRequestEntityTooLarge)
+		return
+	}
+	username, password, basic := r.BasicAuth()
+	if h.amazon == nil || !(basic && h.amazon.VerifyConfirmationCredentials(username, password)) && !h.amazon.VerifyConfirmationCXML(data) {
+		w.Header().Set("WWW-Authenticate", `Basic realm="ProcurementCore Amazon shipment"`)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 	shipment, err := amazon.ParseShipment(data, h.amazon.BuyerIdentity())

@@ -93,7 +93,7 @@ func ParseConfirmation(data []byte, buyerIdentity string) (Confirmation, error) 
 	if len(data) == 0 || len(data) > maxCXMLBytes || xml.Unmarshal(data, &doc) != nil || doc.XMLName.Local != "cXML" {
 		return Confirmation{}, errors.New("invalid cXML confirmation")
 	}
-	if doc.Header.From.Identity != "Amazon" || doc.Header.To.Identity != buyerIdentity || doc.Header.From.Domain != "NetworkId" || doc.Header.To.Domain != "NetworkId" {
+	if doc.Header.From.Identity != "Amazon" || doc.Header.To.Identity != buyerIdentity || !strings.EqualFold(doc.Header.From.Domain, "NetworkId") || !strings.EqualFold(doc.Header.To.Domain, "NetworkId") {
 		return Confirmation{}, errors.New("unexpected cXML identities")
 	}
 	request := doc.Request.Confirmation

@@ -59,7 +59,7 @@ func ParseShipment(data []byte, buyerIdentity string) (Shipment, error) {
 	if len(data) == 0 || len(data) > maxCXMLBytes || xml.Unmarshal(data, &doc) != nil || doc.XMLName.Local != "cXML" {
 		return Shipment{}, errors.New("invalid cXML shipment")
 	}
-	if doc.Header.To.Domain != "NetworkId" || doc.Header.To.Identity != buyerIdentity {
+	if !strings.EqualFold(doc.Header.To.Domain, "NetworkId") || doc.Header.To.Identity != buyerIdentity {
 		return Shipment{}, errors.New("unexpected cXML recipient")
 	}
 	if doc.PayloadID == "" || len(doc.PayloadID) > 255 || len(doc.Request.Notice.Portions) == 0 || len(doc.Request.Notice.Portions) > 100 {

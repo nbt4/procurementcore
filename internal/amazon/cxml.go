@@ -111,6 +111,29 @@ func (c *Client) VerifyConfirmationCredentials(username, password string) bool {
 }
 func (c *Client) BuyerIdentity() string { return c.cfg.FromIdentity }
 
+// VerifyConfirmationCXML validates the credentials Amazon places in an
+// inbound cXML Header when "cXML Authentication" is selected in its UI.
+func (c *Client) VerifyConfirmationCXML(data []byte) bool {
+	if c == nil || len(data) == 0 || len(data) > maxCXMLBytes {
+		return false
+	}
+	var doc struct {
+		XMLName xml.Name `xml:"cXML"`
+		Header  struct {
+			To     credential       `xml:"To>Credential"`
+			Sender senderCredential `xml:"Sender>Credential"`
+		} `xml:"Header"`
+	}
+	if xml.Unmarshal(data, &doc) != nil || doc.XMLName.Local != "cXML" || doc.Header.Sender.SharedSecret == "" {
+		return false
+	}
+	// Amazon may put the configured identity in To or Sender, depending on
+	// the cXML message type. The SharedSecret must always be in Sender.
+	identity := doc.Header.To.Identity == c.cfg.FromIdentity || doc.Header.Sender.Identity == c.cfg.FromIdentity
+	secretHash, expectedHash := sha256.Sum256([]byte(doc.Header.Sender.SharedSecret)), sha256.Sum256([]byte(c.cfg.SharedSecret))
+	return identity && subtle.ConstantTimeCompare(secretHash[:], expectedHash[:]) == 1
+}
+
 type credential struct {
 	Domain   string `xml:"domain,attr"`
 	Identity string `xml:"Identity"`

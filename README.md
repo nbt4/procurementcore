@@ -1,5 +1,14 @@
 # ProcurementCore
 
+Release `1.0.61` akzeptiert für Amazon-Business-Bestellbestätigungen und
+Versandmeldungen zusätzlich **CXML-Authentifizierung**. Procurement prüft
+dabei das `SharedSecret` aus `Header/Sender/Credential` und die konfigurierte
+Identität im cXML-Header. Die bereits in Amazon gewählte Option
+**CXML-Authentifizierung** kann eingeschaltet bleiben; dieselben vorhandenen
+From-Identity-/Shared-Secret-Werte gelten für beide Rückmeldeverbindungen.
+HTTP Basic bleibt ebenfalls nutzbar. Der öffentliche Endpunkt akzeptiert keine
+Nachricht ohne gültige Zugangsdaten.
+
 Release `1.0.60` empfängt Amazon-Business-Bestellbestätigungen und
 Versandmeldungen per cXML. Procurement übernimmt Amazon-Bestellnummern (auch
 bei aufgeteilten Bestellungen), bestätigte und abgelehnte Mengen, erwartete
@@ -14,9 +23,10 @@ Bestellnummer und ursprüngliche cXML-Payload-ID.
 **Advance settings → Order confirmation → Configure** die Übertragung per
 cXML/HTTPS an
 `https://cores.tsunami-events.de/procurementcore/api/v1/amazon/confirmation`
-einrichten. Falls Amazon HTTP-Basic-Zugangsdaten abfragt, als Benutzer die
+einrichten. Für HTTP-Basic-Zugangsdaten als Benutzer die
 bereits hinterlegte **From Identity** und als Passwort das bestehende
-**Shared Secret** verwenden. Unter **Ship Notification → Configure** die
+**Shared Secret** verwenden. Seit `1.0.61` funktioniert mit denselben Werten
+auch die Auswahl **CXML-Authentifizierung**. Unter **Ship Notification → Configure** die
 gleiche Authentifizierung und die URL
 `https://cores.tsunami-events.de/procurementcore/api/v1/amazon/shipment`
 hinterlegen. Die Konfiguration durch eine neue kleine Testbestellung und die
