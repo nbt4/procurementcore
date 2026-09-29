@@ -206,9 +206,23 @@ export default function OrdersPage() {
               {user.isAdmin && selected.status === "sent" && (
                 <Button
                   variant="primary"
-                  onClick={() => void update(selected, "confirmed")}
+                  onClick={() => {
+                    if (!selected.amazonPunchoutSessionId || window.confirm("Nur markieren, wenn Amazon die Bestellung bestätigt hat. Dieser Klick prüft Amazon nicht und löst keine weitere Bestellung aus."))
+                      void update(selected, "confirmed");
+                  }}
                 >
-                  <Truck size={16} /> Bestätigt
+                  <Truck size={16} /> {selected.amazonPunchoutSessionId ? "Amazon-Bestätigung erfassen" : "Bestätigt"}
+                </Button>
+              )}
+              {user.isAdmin && selected.amazonPunchoutSessionId && ["sent", "confirmed"].includes(selected.status) && (
+                <Button
+                  variant="danger"
+                  onClick={() => {
+                    if (window.confirm("Nur markieren, wenn Amazon die Bestellung bereits storniert hat. Dieser Klick storniert nicht bei Amazon."))
+                      void update(selected, "cancelled");
+                  }}
+                >
+                  <X size={16} /> Amazon-Storno erfassen
                 </Button>
               )}
               {user.isAdmin && selected.status === "submission_unknown" && !selected.amazonPunchoutSessionId && (
@@ -241,6 +255,13 @@ export default function OrdersPage() {
           }
         >
           <div className="form-grid">
+            {selected.amazonPunchoutSessionId && selected.status === "sent" && (
+              <Field label="Amazon-Status" full>
+                <div className="notice" role="status">
+                  „Gesendet“ bestätigt nur die cXML-Übertragung. Prüfe die Bestellung und mögliche Stornos im Amazon Business Konto, bevor du den Status änderst.
+                </div>
+              </Field>
+            )}
             <Field label="Status">
               <Badge tone={tone(selected.status)}>
                 {statusLabel[selected.status]}

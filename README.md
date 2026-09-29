@@ -1,5 +1,14 @@
 # ProcurementCore
 
+Release `1.0.59` ergänzt Empfänger und Region in der cXML-Lieferadresse und
+sendet die E-Mail mit Adresskennung. Amazon hatte zuvor Test- und Live-
+Bestellungen trotz cXML-Status 200 später mit `003-052` (ungültige
+Lieferadresse) storniert. Ein cXML-Status 200 bestätigt nur die Übertragung;
+die Ausführung muss im Amazon-Business-Konto oder per Amazon-E-Mail geprüft
+werden. Der Button **Amazon-Bestätigung erfassen** ändert nur den lokalen
+Procurement-Status. **Amazon-Storno erfassen** dokumentiert eine bereits bei
+Amazon stornierte Bestellung und löst dort kein Storno aus.
+
 Release `1.0.58` akzeptiert die gemäß cXML-Standard unabhängig von Groß- und
 Kleinschreibung benannten Formularfelder der Amazon-Warenkorb-Rückgabe.
 Amazon postet den Warenkorb an
@@ -32,6 +41,8 @@ Konfiguration erfolgt ausschließlich über Laufzeitvariablen:
 | `AMAZON_PUNCHOUT_RETURN_URL` | Öffentliche HTTPS-URL auf `/procurementcore/api/v1/amazon/punchout/return` |
 | `AMAZON_PUNCHOUT_MODE` | `test` (Standard) oder `production` |
 | `AMAZON_SHIP_TO_*` | Firma, Straße, PLZ, Ort, ISO-Ländercode und optionale E-Mail |
+| `AMAZON_SHIP_TO_RECIPIENT` | Empfänger für `DeliverTo`; ohne Wert wird die Firma verwendet |
+| `AMAZON_SHIP_TO_REGION` | Optionales Bundesland für `State` im cXML |
 
 Die Rückgabe-URL muss von Amazon per HTTPS erreichbar sein. Der Endpunkt ist
 öffentlich, akzeptiert aber nur eine einmalig verwendbare, zufällige Sitzung

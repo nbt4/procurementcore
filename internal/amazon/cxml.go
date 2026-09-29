@@ -34,8 +34,10 @@ type Config struct {
 
 type Address struct {
 	Company    string `json:"company"`
+	Recipient  string `json:"recipient"`
 	Street     string `json:"street"`
 	City       string `json:"city"`
+	Region     string `json:"region"`
 	PostalCode string `json:"postalCode"`
 	Country    string `json:"country"`
 	Email      string `json:"email"`
@@ -394,6 +396,11 @@ type orderDocument struct {
 		} `xml:"OrderRequest"`
 	} `xml:"Request"`
 }
+type xmlEmail struct {
+	Name  string `xml:"name,attr"`
+	Value string `xml:",chardata"`
+}
+
 type xmlAddress struct {
 	CountryCode string `xml:"isoCountryCode,attr"`
 	Name        struct {
@@ -402,22 +409,35 @@ type xmlAddress struct {
 	} `xml:"Name"`
 	Postal struct {
 		Name       string `xml:"name,attr"`
+		DeliverTo  string `xml:"DeliverTo"`
 		Street     string `xml:"Street"`
 		City       string `xml:"City"`
+		Region     string `xml:"State,omitempty"`
 		PostalCode string `xml:"PostalCode"`
 		Country    struct {
 			Code  string `xml:"isoCountryCode,attr"`
 			Value string `xml:",chardata"`
 		} `xml:"Country"`
 	} `xml:"PostalAddress"`
-	Email string `xml:"Email,omitempty"`
+	Email *xmlEmail `xml:"Email,omitempty"`
 }
 
 func addressXML(a Address) xmlAddress {
-	value := xmlAddress{CountryCode: strings.ToUpper(a.Country), Email: a.Email}
+	value := xmlAddress{CountryCode: strings.ToUpper(a.Country)}
 	value.Name.Language, value.Name.Value = "de", a.Company
-	value.Postal.Name, value.Postal.Street, value.Postal.City, value.Postal.PostalCode = "default", a.Street, a.City, a.PostalCode
-	value.Postal.Country.Code, value.Postal.Country.Value = strings.ToUpper(a.Country), strings.ToUpper(a.Country)
+	value.Postal.Name, value.Postal.Street, value.Postal.City, value.Postal.Region, value.Postal.PostalCode = "default", a.Street, a.City, a.Region, a.PostalCode
+	value.Postal.DeliverTo = strings.TrimSpace(a.Recipient)
+	if value.Postal.DeliverTo == "" {
+		value.Postal.DeliverTo = a.Company
+	}
+	value.Postal.Country.Code = strings.ToUpper(a.Country)
+	value.Postal.Country.Value = map[string]string{"DE": "Deutschland"}[value.Postal.Country.Code]
+	if value.Postal.Country.Value == "" {
+		value.Postal.Country.Value = value.Postal.Country.Code
+	}
+	if a.Email != "" {
+		value.Email = &xmlEmail{Name: "default", Value: a.Email}
+	}
 	return value
 }
 

@@ -28,7 +28,7 @@ func TestPunchoutRoundTrip(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	client, err := New(Config{FromIdentity: "buyer", SharedSecret: "private", TestURL: server.URL, LiveURL: server.URL, OrderURL: server.URL, ReturnURL: server.URL, Mode: "test", AllowHTTP: true, ShipTo: Address{Company: "Tsunami Events UG", Street: "Ringstraße 12", City: "Haiger", PostalCode: "35708", Country: "DE"}})
+	client, err := New(Config{FromIdentity: "buyer", SharedSecret: "private", TestURL: server.URL, LiveURL: server.URL, OrderURL: server.URL, ReturnURL: server.URL, Mode: "test", AllowHTTP: true, ShipTo: Address{Company: "Tsunami Events UG", Recipient: "Noah Tielmann", Street: "Ringstraße 12", City: "Haiger", Region: "Hessen", PostalCode: "35708", Country: "DE", Email: "noah.tielmann@tsunami-events.de"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestPunchoutRoundTrip(t *testing.T) {
 			t.Errorf("setup missing %s", value)
 		}
 	}
-	for _, value := range []string{`type="new"`, "<SupplierPartAuxiliaryID>opaque-token</SupplierPartAuxiliaryID>", "<Street>Ringstraße 12</Street>", `<Money currency="EUR">24.68</Money>`} {
+	for _, value := range []string{`type="new"`, "<SupplierPartAuxiliaryID>opaque-token</SupplierPartAuxiliaryID>", "<DeliverTo>Noah Tielmann</DeliverTo>", "<Street>Ringstraße 12</Street>", "<State>Hessen</State>", `<Country isoCountryCode="DE">Deutschland</Country>`, `<Email name="default">noah.tielmann@tsunami-events.de</Email>`, `<Money currency="EUR">24.68</Money>`} {
 		if !strings.Contains(requests[1], value) {
 			t.Errorf("order missing %s", value)
 		}
