@@ -53,6 +53,22 @@ Suite-Zustände. Die Anlage bleibt eine ausdrückliche Primäraktion; ein Upload
 allein erzeugt noch keine Bestellung. Mobile Formulare und Positionszeilen
 brechen gemäß den bestehenden Regeln einspaltig beziehungsweise zweispaltig um.
 
+## Bedarf aus Angebots-PDF
+
+Auf der Bedarfsseite öffnet die sekundäre Aktion „Aus Angebots-PDF“ zuerst einen
+PDF-Upload und danach eine breite, vollständig bearbeitbare Vorschau. Text-PDFs
+werden direkt gelesen; gescannte PDFs durchlaufen lokale OCR. Lieferant,
+Angebotsnummer, Titel, Kostenstelle, Termine, Mengen, Preise und Katalogzuordnung
+bleiben vor dem Speichern prüfbar. JEV kann nur nicht eindeutig zugeordnete
+Positionen anhand begrenzter Katalogkandidaten vorschlagen; die Person bestätigt
+die Auswahl. Unbekannte Positionen bleiben wahlweise Freitext oder werden über
+eine ausdrücklich aktivierte Neuanlage mit SKU, Artikelname und Hersteller
+zusammen mit dem Bedarf gespeichert. Die Anlage des Bedarfs, neuer Artikel und
+ihrer Bezugsquellen erfolgt in einer Transaktion. Die PDF wird nicht dauerhaft
+gespeichert. Fehlende Positionen werden nie aus einem Gesamtbetrag erfunden;
+stattdessen können Positionen im Prüfschritt ergänzt werden. Prüfhinweise und
+Fehler stehen direkt am Formular und sind ohne Farberkennung lesbar.
+
 ## Implementierung
 
 `web/src/cores-theme.css` und `web/src/lib/cores-design.ts` sind generierte Dateien. Änderungen erfolgen in den kanonischen Quellen des Umbrella-Repositories und werden dort synchronisiert und geprüft. Lokale Komponenten verwenden die `suite-*`-Primitives und dürfen sie nur fachlich ergänzen.

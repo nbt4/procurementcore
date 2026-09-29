@@ -7,6 +7,7 @@ Die erste Version übernimmt die wiederkehrenden Kernmuster etablierter Procurem
 ## V1 – umgesetzt
 
 1. Bedarf erfassen: Katalog- oder Freitextpositionen, Kostenstelle, Begründung und Bedarfsdatum; gespeicherte Katalogpositionen öffnen direkt den Artikel oder die hinterlegte Produktseite.
+   Angebots-PDFs (insbesondere Adam Hall) können mit lokaler OCR und optionaler JEV-Katalogzuordnung als prüfbare Bedarfsentwürfe übernommen werden. Fehlende Artikel und ihre Bezugsquelle lassen sich dabei direkt anlegen.
 2. Freigeben: Entwurf, Einreichung, Admin-Freigabe/Ablehnung und dokumentierte Entscheidung.
 3. Sourcing: Lieferanten, Preferred-Status, Rating, Risiko, Konditionen und Lieferzeiten.
 4. Katalog: Kategorien mit dynamischem Parameterschema und exakten Parameterfiltern.

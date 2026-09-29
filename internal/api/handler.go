@@ -74,6 +74,8 @@ func (h *Handler) Routes() http.Handler {
 	r.Get("/requisitions", h.listRequisitions)
 	r.Get("/requisitions/{id}", h.getRequisition)
 	r.Post("/requisitions", h.createRequisition)
+	r.Post("/requisitions/offer-preview", h.previewRequisitionOffer)
+	r.With(auth.RequireAdmin).Post("/requisitions/from-offer", h.createRequisitionFromOffer)
 	r.Put("/requisitions/{id}", h.updateRequisition)
 	r.Post("/requisitions/{id}/submit", h.submitRequisition)
 	r.With(auth.RequireAdmin).Post("/requisitions/{id}/decision", h.decideRequisition)
@@ -1734,7 +1736,12 @@ func (h *Handler) convertRequisition(w http.ResponseWriter, r *http.Request) {
 		if line.ProductID != nil {
 			var offer models.Offer
 			if err := h.db.Where("product_id = ? AND supplier_id = ? AND active = ?", *line.ProductID, input.SupplierID, true).Order("price_cents").First(&offer).Error; err == nil {
-				price, link = offer.PriceCents, offer.PurchaseURL
+				if line.PreferredSupplierID == nil || *line.PreferredSupplierID != input.SupplierID {
+					price = offer.PriceCents
+				}
+				if link == "" {
+					link = offer.PurchaseURL
+				}
 			}
 		}
 		order.Lines = append(order.Lines, models.PurchaseOrderLine{ProductID: line.ProductID, Description: line.Description, Quantity: line.Quantity, Unit: line.Unit, UnitPriceCents: price, PurchaseURL: link})

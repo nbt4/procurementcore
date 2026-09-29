@@ -1,5 +1,23 @@
 # ProcurementCore
 
+## Bedarfe aus Angebots-PDFs (1.0.55)
+
+Administratoren können auf der Bedarfsseite ein Lieferantenangebot als PDF
+analysieren und daraus einen Bedarfsentwurf anlegen. PDFs mit Textebene werden
+direkt gelesen; gescannte Angebote durchlaufen lokale OCR mit Poppler und
+Tesseract (Deutsch/Englisch). Der Upload ist auf 12 MB und 100 Seiten begrenzt,
+bei OCR auf 20 Seiten. Die PDF wird nicht gespeichert. JEV schlägt bei
+konfiguriertem OpenRouter-Zugang passende Katalogartikel vor; die Zuordnung
+bleibt vor dem Speichern editierbar. Unbekannte Positionen können als Freitext
+bleiben oder mit ausdrücklich gewählter SKU, Name und Hersteller direkt als
+Artikel samt Lieferantenbezugsquelle angelegt werden. Bedarf, neue Artikel und
+Bezugsquellen werden atomar gespeichert. Angebotsnummer und Dateiname werden
+als Quelle am Bedarf vermerkt. Positionen, Mengen und Preise müssen vor dem
+Speichern geprüft werden; bei OCR besonders sorgfältig. Bedarfe führen Preise
+in EUR, andere Angebotswährungen müssen vor der Anlage manuell umgerechnet
+werden. Beim späteren Bestellen bleibt der bestätigte Angebotspreis für den
+bevorzugten Lieferanten erhalten.
+
 Release `1.0.54` erlaubt die vollständige Bearbeitung eines Bestellentwurfs
 über `PUT /api/v1/orders/{id}/draft`. Lieferant, Bestellnummer, Währung,
 Termine, Notizen und sämtliche Positionen werden nach Prüfung aktiver

@@ -50,6 +50,7 @@ type ProductHint struct {
 
 type Line struct {
 	ProductID        *uint   `json:"productId,omitempty"`
+	SupplierSKU      string  `json:"supplierSku,omitempty"`
 	Description      string  `json:"description"`
 	Quantity         float64 `json:"quantity"`
 	ReceivedQuantity float64 `json:"receivedQuantity"`

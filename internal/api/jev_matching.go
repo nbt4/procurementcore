@@ -36,7 +36,8 @@ func (h *Handler) enrichOrderImportWithJev(ctx context.Context, preview *orderim
 			if line.ProductID != nil || strings.TrimSpace(line.Description) == "" {
 				continue
 			}
-			candidates := orderLineCandidates(line.Description, preview.SupplierID, products, jevMaxChoiceCandidates)
+			lineEvidence := strings.TrimSpace(line.SupplierSKU + " " + line.Description)
+			candidates := orderLineCandidates(lineEvidence, preview.SupplierID, products, jevMaxChoiceCandidates)
 			if len(candidates) == 0 {
 				continue
 			}
@@ -49,7 +50,7 @@ func (h *Handler) enrichOrderImportWithJev(ctx context.Context, preview *orderim
 			}
 			questionID := fmt.Sprintf("line_%d", index)
 			choices[questionID] = jev.Choice{
-				Instructions: fmt.Sprintf("The OCR order line is %q. Choose the candidate that denotes the same exact commercial product. Treat different variants, sizes, connector types and model numbers as different products. Choose no_match when evidence is insufficient.", line.Description),
+				Instructions: fmt.Sprintf("The PDF line is %q. Choose the candidate that denotes the same exact commercial product. Treat different variants, sizes, connector types and model numbers as different products. Choose no_match when evidence is insufficient.", lineEvidence),
 				Criteria:     criteria,
 			}
 			candidateByQuestion[questionID] = byChoice
