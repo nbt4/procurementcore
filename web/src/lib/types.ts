@@ -183,10 +183,26 @@ export type OrderLine = {
   unit: string;
   unitPriceCents: number;
   purchaseUrl: string;
+  amazonConfirmations?: {
+    amazonOrderNumber: string;
+    acceptedQuantity: number;
+    rejectedQuantity: number;
+    expectedDelivery?: string;
+    noticeDate?: string;
+  }[];
 };
 export type Order = {
   amazonPunchoutSessionId?: number;
   amazonPayloadId?: string;
+  amazonOrderNumbers?: string;
+  amazonShipments?: {
+    id: number;
+    shipmentId: string;
+    trackingNumber: string;
+    carrier: string;
+    shipmentDate?: string;
+    deliveryDate?: string;
+  }[];
   id: number;
   number: string;
   supplierOrderNumber: string;

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/xml"
 	"errors"
@@ -99,6 +101,15 @@ func (c *Client) ReadyToOrder() bool {
 	return c != nil && c.cfg.OrderURL != "" && c.cfg.ShipTo.Complete() && c.cfg.BillTo.Complete()
 }
 func (c *Client) ShipTo() Address { return c.cfg.ShipTo }
+func (c *Client) VerifyConfirmationCredentials(username, password string) bool {
+	if c == nil || username == "" || password == "" {
+		return false
+	}
+	userHash, expectedUserHash := sha256.Sum256([]byte(username)), sha256.Sum256([]byte(c.cfg.FromIdentity))
+	passHash, expectedPassHash := sha256.Sum256([]byte(password)), sha256.Sum256([]byte(c.cfg.SharedSecret))
+	return subtle.ConstantTimeCompare(userHash[:], expectedUserHash[:]) == 1 && subtle.ConstantTimeCompare(passHash[:], expectedPassHash[:]) == 1
+}
+func (c *Client) BuyerIdentity() string { return c.cfg.FromIdentity }
 
 type credential struct {
 	Domain   string `xml:"domain,attr"`

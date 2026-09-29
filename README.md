@@ -1,5 +1,35 @@
 # ProcurementCore
 
+Release `1.0.60` empfängt Amazon-Business-Bestellbestätigungen und
+Versandmeldungen per cXML. Procurement übernimmt Amazon-Bestellnummern (auch
+bei aufgeteilten Bestellungen), bestätigte und abgelehnte Mengen, erwartete
+Liefertermine sowie Sendungsnummern und Trackingdaten. Vollständig abgelehnte
+Bestellungen wechseln automatisch auf **Storniert**; gemischte Rückmeldungen
+auf **Teilweise bestätigt**. Wiederholte Nachrichten sind idempotent. Für
+Wareneingänge gilt höchstens die von Amazon bestätigte Menge. Die öffentliche
+Rückmeldung ist durch HTTP Basic geschützt und prüft zudem die cXML-Identität,
+Bestellnummer und ursprüngliche cXML-Payload-ID.
+
+**Amazon Business einrichten:** In der bestehenden Einkaufsgruppe unter
+**Advance settings → Order confirmation → Configure** die Übertragung per
+cXML/HTTPS an
+`https://cores.tsunami-events.de/procurementcore/api/v1/amazon/confirmation`
+einrichten. Falls Amazon HTTP-Basic-Zugangsdaten abfragt, als Benutzer die
+bereits hinterlegte **From Identity** und als Passwort das bestehende
+**Shared Secret** verwenden. Unter **Ship Notification → Configure** die
+gleiche Authentifizierung und die URL
+`https://cores.tsunami-events.de/procurementcore/api/v1/amazon/shipment`
+hinterlegen. Die Konfiguration durch eine neue kleine Testbestellung und die
+Amazon-Rückmeldung prüfen. Bereits vor Aktivierung gesendete Nachrichten
+werden nicht nachträglich zugestellt.
+
+Amazon garantiert über PunchOut keine laufende Statusabfrage. Spätere
+Stornierungen werden nur automatisch übernommen, wenn Amazon sie als weitere
+cXML-Bestellbestätigung sendet. Für einen vollständigen Abgleich unabhängig
+von cXML-Nachrichten wäre zusätzlich die Amazon Business Reporting API mit
+separater API-Freischaltung erforderlich. Solange eine Rückmeldung ausbleibt,
+bleiben die manuellen Bestätigungs- und Stornofunktionen verfügbar.
+
 Release `1.0.59` ergänzt Empfänger und Region in der cXML-Lieferadresse und
 sendet die E-Mail mit Adresskennung. Amazon hatte zuvor Test- und Live-
 Bestellungen trotz cXML-Status 200 später mit `003-052` (ungültige

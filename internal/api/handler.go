@@ -1799,7 +1799,7 @@ func (h *Handler) getOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var row models.PurchaseOrder
-	if err := h.db.Preload("Supplier").Preload("Lines").Preload("Lines.Product").First(&row, id).Error; err != nil {
+	if err := h.db.Preload("Supplier").Preload("Lines", func(db *gorm.DB) *gorm.DB { return db.Order("id") }).Preload("Lines.Product").Preload("Lines.AmazonConfirmations").Preload("AmazonShipments").First(&row, id).Error; err != nil {
 		notFound(w)
 		return
 	}
@@ -1922,8 +1922,8 @@ func orderTransitionAllowed(from, to string) bool {
 	case "draft":
 		return to == "sent" || to == "cancelled"
 	case "sent":
-		return to == "confirmed" || to == "cancelled"
-	case "confirmed", "partially_received":
+		return to == "confirmed" || to == "partially_confirmed" || to == "cancelled"
+	case "confirmed", "partially_confirmed", "partially_received":
 		return to == "cancelled"
 	case "submission_unknown":
 		return to == "draft"
@@ -2006,7 +2006,7 @@ func (h *Handler) updateOrder(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &input) {
 		return
 	}
-	allowed := map[string]bool{"draft": true, "sent": true, "confirmed": true, "partially_received": true, "received": true, "cancelled": true, "submission_unknown": true}
+	allowed := map[string]bool{"draft": true, "sent": true, "confirmed": true, "partially_confirmed": true, "partially_received": true, "received": true, "cancelled": true, "submission_unknown": true}
 	if !allowed[input.Status] {
 		badRequest(w, "Ungültiger Bestellstatus")
 		return
@@ -2392,7 +2392,7 @@ func (h *Handler) receiveOrder(w http.ResponseWriter, r *http.Request) {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&order, id).Error; err != nil {
 			return err
 		}
-		if order.Status != "sent" && order.Status != "confirmed" && order.Status != "partially_received" {
+		if order.Status != "sent" && order.Status != "confirmed" && order.Status != "partially_confirmed" && order.Status != "partially_received" {
 			return &receiptFlowError{status: http.StatusConflict, code: "order_not_receivable", message: "Wareneingang ist nur für versendete oder bestätigte Bestellungen zulässig"}
 		}
 		if versionErr := validateExpectedUpdate(order.UpdatedAt, input.ExpectedUpdatedAt, isMCPMutation(r)); versionErr != nil {
@@ -2404,6 +2404,18 @@ func (h *Handler) receiveOrder(w http.ResponseWriter, r *http.Request) {
 		beforeOrder, beforeLine := order, line
 		if line.ReceivedQuantity+input.Quantity > line.Quantity && !input.AllowOverdelivery {
 			return &receiptFlowError{status: http.StatusBadRequest, code: "ordered_quantity_exceeded", message: "Wareneingang überschreitet Bestellmenge"}
+		}
+		if order.AmazonPunchoutSessionID != nil {
+			var confirmed struct {
+				Count    int64
+				Accepted float64
+			}
+			if err := tx.Model(&models.AmazonLineConfirmation{}).Select("COUNT(*) AS count, COALESCE(SUM(accepted_quantity), 0) AS accepted").Where("purchase_order_line_id = ?", line.ID).Scan(&confirmed).Error; err != nil {
+				return err
+			}
+			if confirmed.Count > 0 && line.ReceivedQuantity+input.Quantity > confirmed.Accepted+0.000001 {
+				return &receiptFlowError{status: http.StatusConflict, code: "amazon_confirmed_quantity_exceeded", message: "Wareneingang überschreitet die von Amazon bestätigte Menge"}
+			}
 		}
 		if line.ProductID != nil {
 			var warehouseProductID int64

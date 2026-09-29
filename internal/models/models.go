@@ -159,6 +159,7 @@ type PurchaseOrder struct {
 	AmazonPayloadID         string              `gorm:"size:100" json:"amazonPayloadId,omitempty"`
 	Number                  string              `gorm:"size:40;unique;not null" json:"number"`
 	SupplierOrderNumber     string              `gorm:"size:120;index" json:"supplierOrderNumber"`
+	AmazonOrderNumbers      string              `gorm:"type:text" json:"amazonOrderNumbers,omitempty"`
 	SupplierID              uint                `gorm:"not null;index" json:"supplierId"`
 	Supplier                *Supplier           `json:"supplier,omitempty"`
 	RequisitionID           *uint               `gorm:"index" json:"requisitionId"`
@@ -173,21 +174,60 @@ type PurchaseOrder struct {
 	CreatedAt               time.Time           `json:"createdAt"`
 	UpdatedAt               time.Time           `json:"updatedAt"`
 	Lines                   []PurchaseOrderLine `json:"lines"`
+	AmazonShipments         []AmazonShipment    `gorm:"foreignKey:PurchaseOrderID" json:"amazonShipments,omitempty"`
 }
 
 type PurchaseOrderLine struct {
-	ID                      uint     `gorm:"primaryKey" json:"id"`
-	SupplierPartID          string   `gorm:"size:120" json:"supplierPartId,omitempty"`
-	SupplierPartAuxiliaryID string   `gorm:"size:500" json:"supplierPartAuxiliaryId,omitempty"`
-	PurchaseOrderID         uint     `gorm:"not null;index" json:"purchaseOrderId"`
-	ProductID               *uint    `gorm:"index" json:"productId"`
-	Product                 *Product `json:"product,omitempty"`
-	Description             string   `gorm:"size:500;not null" json:"description"`
-	Quantity                float64  `json:"quantity"`
-	ReceivedQuantity        float64  `json:"receivedQuantity"`
-	Unit                    string   `gorm:"size:30" json:"unit"`
-	UnitPriceCents          int64    `json:"unitPriceCents"`
-	PurchaseURL             string   `gorm:"size:2000" json:"purchaseUrl"`
+	ID                      uint                     `gorm:"primaryKey" json:"id"`
+	SupplierPartID          string                   `gorm:"size:120" json:"supplierPartId,omitempty"`
+	SupplierPartAuxiliaryID string                   `gorm:"size:500" json:"supplierPartAuxiliaryId,omitempty"`
+	PurchaseOrderID         uint                     `gorm:"not null;index" json:"purchaseOrderId"`
+	ProductID               *uint                    `gorm:"index" json:"productId"`
+	Product                 *Product                 `json:"product,omitempty"`
+	Description             string                   `gorm:"size:500;not null" json:"description"`
+	Quantity                float64                  `json:"quantity"`
+	ReceivedQuantity        float64                  `json:"receivedQuantity"`
+	Unit                    string                   `gorm:"size:30" json:"unit"`
+	UnitPriceCents          int64                    `json:"unitPriceCents"`
+	PurchaseURL             string                   `gorm:"size:2000" json:"purchaseUrl"`
+	AmazonConfirmations     []AmazonLineConfirmation `gorm:"foreignKey:PurchaseOrderLineID" json:"amazonConfirmations,omitempty"`
+}
+
+// AmazonLineConfirmation is the latest supplier state for one Amazon order and PO line.
+// A buyer PO can be split into several Amazon orders.
+type AmazonLineConfirmation struct {
+	ID                  uint       `gorm:"primaryKey" json:"id"`
+	PurchaseOrderID     uint       `gorm:"not null;index" json:"-"`
+	PurchaseOrderLineID uint       `gorm:"not null;uniqueIndex:idx_amazon_line_order,priority:1" json:"-"`
+	AmazonOrderNumber   string     `gorm:"size:120;not null;uniqueIndex:idx_amazon_line_order,priority:2" json:"amazonOrderNumber"`
+	AcceptedQuantity    float64    `json:"acceptedQuantity"`
+	RejectedQuantity    float64    `json:"rejectedQuantity"`
+	ExpectedDelivery    *time.Time `json:"expectedDelivery,omitempty"`
+	NoticeDate          *time.Time `json:"noticeDate,omitempty"`
+	CreatedAt           time.Time  `json:"-"`
+	UpdatedAt           time.Time  `json:"-"`
+}
+
+type AmazonConfirmationEvent struct {
+	ID              uint   `gorm:"primaryKey"`
+	PayloadID       string `gorm:"size:255;not null;uniqueIndex"`
+	PurchaseOrderID uint   `gorm:"not null;index"`
+	ConfirmID       string `gorm:"size:120"`
+	Type            string `gorm:"size:30;not null"`
+	NoticeDate      *time.Time
+	CreatedAt       time.Time
+}
+
+type AmazonShipment struct {
+	ID              uint       `gorm:"primaryKey" json:"id"`
+	PayloadID       string     `gorm:"size:255;not null;uniqueIndex:idx_amazon_shipment_payload_order,priority:1" json:"-"`
+	PurchaseOrderID uint       `gorm:"not null;uniqueIndex:idx_amazon_shipment_payload_order,priority:2;index" json:"-"`
+	ShipmentID      string     `gorm:"size:120" json:"shipmentId"`
+	TrackingNumber  string     `gorm:"size:255" json:"trackingNumber"`
+	Carrier         string     `gorm:"size:120" json:"carrier"`
+	ShipmentDate    *time.Time `json:"shipmentDate,omitempty"`
+	DeliveryDate    *time.Time `json:"deliveryDate,omitempty"`
+	CreatedAt       time.Time  `json:"createdAt"`
 }
 
 type Receipt struct {
@@ -242,18 +282,21 @@ type AmazonPunchoutSession struct {
 	UpdatedAt  time.Time `json:"updatedAt"`
 }
 
-func (Supplier) TableName() string              { return "proc_suppliers" }
-func (Category) TableName() string              { return "proc_categories" }
-func (Product) TableName() string               { return "proc_products" }
-func (CoreProductLink) TableName() string       { return "core_product_links" }
-func (Offer) TableName() string                 { return "proc_offers" }
-func (PriceHistory) TableName() string          { return "proc_price_histories" }
-func (PriceAlert) TableName() string            { return "proc_price_alerts" }
-func (Requisition) TableName() string           { return "proc_requisitions" }
-func (AmazonPunchoutSession) TableName() string { return "proc_amazon_punchout_sessions" }
-func (RequisitionLine) TableName() string       { return "proc_requisition_lines" }
-func (PurchaseOrder) TableName() string         { return "proc_purchase_orders" }
-func (PurchaseOrderLine) TableName() string     { return "proc_purchase_order_lines" }
-func (Receipt) TableName() string               { return "proc_receipts" }
-func (Activity) TableName() string              { return "proc_activities" }
-func (IdempotencyRecord) TableName() string     { return "proc_idempotency_records" }
+func (Supplier) TableName() string                { return "proc_suppliers" }
+func (Category) TableName() string                { return "proc_categories" }
+func (Product) TableName() string                 { return "proc_products" }
+func (CoreProductLink) TableName() string         { return "core_product_links" }
+func (Offer) TableName() string                   { return "proc_offers" }
+func (PriceHistory) TableName() string            { return "proc_price_histories" }
+func (PriceAlert) TableName() string              { return "proc_price_alerts" }
+func (Requisition) TableName() string             { return "proc_requisitions" }
+func (AmazonPunchoutSession) TableName() string   { return "proc_amazon_punchout_sessions" }
+func (AmazonLineConfirmation) TableName() string  { return "proc_amazon_line_confirmations" }
+func (AmazonConfirmationEvent) TableName() string { return "proc_amazon_confirmation_events" }
+func (AmazonShipment) TableName() string          { return "proc_amazon_shipments" }
+func (RequisitionLine) TableName() string         { return "proc_requisition_lines" }
+func (PurchaseOrder) TableName() string           { return "proc_purchase_orders" }
+func (PurchaseOrderLine) TableName() string       { return "proc_purchase_order_lines" }
+func (Receipt) TableName() string                 { return "proc_receipts" }
+func (Activity) TableName() string                { return "proc_activities" }
+func (IdempotencyRecord) TableName() string       { return "proc_idempotency_records" }

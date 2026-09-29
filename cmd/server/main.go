@@ -27,7 +27,7 @@ import (
 	"github.com/rs/zerolog"
 )
 
-const version = "1.0.59"
+const version = "1.0.60"
 
 const procurementMountPath = "/procurementcore"
 
@@ -119,6 +119,8 @@ func main() {
 	}
 	apiHandler := api.NewHandler(db, productScraper, amazonClient)
 	mux.HandleFunc("POST /api/v1/amazon/punchout/return", apiHandler.HandleAmazonReturn)
+	mux.HandleFunc("POST /api/v1/amazon/confirmation", apiHandler.HandleAmazonConfirmation)
+	mux.HandleFunc("POST /api/v1/amazon/shipment", apiHandler.HandleAmazonShipment)
 	mux.Handle("/api/v1/", http.StripPrefix("/api/v1", auth.Middleware(commonjwt.DatabaseUserLookup(sqlDB), apiHandler.Routes())))
 
 	mux.Handle("GET /assets/", assets)

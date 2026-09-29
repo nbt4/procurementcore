@@ -219,9 +219,16 @@ func (h *Handler) submitAmazonOrder(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now()
 	updated := h.db.Model(&models.PurchaseOrder{}).Where("id = ? AND status = 'submitting'", id).Updates(map[string]any{"status": "sent", "order_date": now})
-	if updated.Error != nil || updated.RowsAffected != 1 {
+	if updated.Error != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Amazon hat die Bestellung bestätigt; lokaler Status muss geprüft werden"})
 		return
+	}
+	if updated.RowsAffected != 1 {
+		var current models.PurchaseOrder
+		if err := h.db.First(&current, id).Error; err != nil || current.Status == "submitting" {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Amazon hat die Bestellung bestätigt; lokaler Status muss geprüft werden"})
+			return
+		}
 	}
 	h.activity(r, "purchase_order", id, "ordered_at_amazon", row.Number)
 	if err := h.db.Preload("Supplier").Preload("Lines").First(&row, id).Error; err != nil {

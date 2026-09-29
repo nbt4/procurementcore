@@ -30,6 +30,7 @@ const statusLabel: Record<string, string> = {
   draft: "Entwurf",
   sent: "Gesendet",
   confirmed: "Bestätigt",
+  partially_confirmed: "Teilweise bestätigt",
   partially_received: "Teileingang",
   received: "Empfangen",
   cancelled: "Storniert",
@@ -41,7 +42,7 @@ const tone = (status: string) =>
     ? "green"
     : status === "partially_received" || status === "confirmed"
       ? "blue"
-      : status === "sent"
+      : status === "sent" || status === "partially_confirmed"
         ? "amber"
         : status === "cancelled" || status === "submission_unknown"
           ? "red"
@@ -214,7 +215,7 @@ export default function OrdersPage() {
                   <Truck size={16} /> {selected.amazonPunchoutSessionId ? "Amazon-Bestätigung erfassen" : "Bestätigt"}
                 </Button>
               )}
-              {user.isAdmin && selected.amazonPunchoutSessionId && ["sent", "confirmed"].includes(selected.status) && (
+              {user.isAdmin && selected.amazonPunchoutSessionId && ["sent", "confirmed", "partially_confirmed"].includes(selected.status) && (
                 <Button
                   variant="danger"
                   onClick={() => {
@@ -258,7 +259,7 @@ export default function OrdersPage() {
             {selected.amazonPunchoutSessionId && selected.status === "sent" && (
               <Field label="Amazon-Status" full>
                 <div className="notice" role="status">
-                  „Gesendet“ bestätigt nur die cXML-Übertragung. Prüfe die Bestellung und mögliche Stornos im Amazon Business Konto, bevor du den Status änderst.
+                  „Gesendet“ bestätigt nur die cXML-Übertragung. Die Amazon-Bestellbestätigung aktualisiert Nummern, Liefertermine und Stornos automatisch, sobald Amazon die Rückmeldung eingerichtet und zugestellt hat. Bis dahin im Amazon Business Konto prüfen.
                 </div>
               </Field>
             )}
@@ -270,6 +271,20 @@ export default function OrdersPage() {
             <Field label="Erwartete Lieferung">
               <span>{date(selected.expectedDelivery)}</span>
             </Field>
+            {selected.amazonOrderNumbers && (
+              <Field label="Amazon-Bestellnummern" full>
+                <span>{selected.amazonOrderNumbers}</span>
+              </Field>
+            )}
+            {!!selected.amazonShipments?.length && (
+              <Field label="Amazon-Sendungen" full>
+                {selected.amazonShipments.map((shipment) => (
+                  <div key={shipment.id}>
+                    {shipment.shipmentId}{shipment.carrier ? ` · ${shipment.carrier}` : ""}{shipment.trackingNumber ? ` · Tracking ${shipment.trackingNumber}` : ""}{shipment.shipmentDate ? ` · Versand ${date(shipment.shipmentDate)}` : ""}{shipment.deliveryDate ? ` · Lieferung ${date(shipment.deliveryDate)}` : ""}
+                  </div>
+                ))}
+              </Field>
+            )}
             <Field label="Lieferanten-Bestellnummer" full>
               <SupplierOrderNumberEditor
                 order={selected}
@@ -302,6 +317,11 @@ export default function OrdersPage() {
                     <td>
                       <span className="cell-title">{line.description}</span>
                       <div className="cell-sub">{line.product?.sku}</div>
+                      {line.amazonConfirmations?.map((confirmation, index) => (
+                        <div className="cell-sub" key={`${confirmation.amazonOrderNumber}-${index}`}>
+                          Amazon {confirmation.amazonOrderNumber || "ohne Nummer"}: {confirmation.acceptedQuantity > 0 ? `${confirmation.acceptedQuantity} bestätigt` : ""}{confirmation.acceptedQuantity > 0 && confirmation.rejectedQuantity > 0 ? ", " : ""}{confirmation.rejectedQuantity > 0 ? `${confirmation.rejectedQuantity} storniert` : ""}{confirmation.expectedDelivery ? ` · Lieferung ${date(confirmation.expectedDelivery)}` : ""}
+                        </div>
+                      ))}
                     </td>
                     <td>
                       {line.quantity} {line.unit}
@@ -324,7 +344,8 @@ export default function OrdersPage() {
                         )}
                         {user.isAdmin &&
                           line.receivedQuantity < line.quantity &&
-                          !["draft", "cancelled"].includes(selected.status) && (
+                          ["sent", "confirmed", "partially_confirmed", "partially_received"].includes(selected.status) &&
+                          (!line.amazonConfirmations?.length || line.receivedQuantity < line.amazonConfirmations.reduce((sum, confirmation) => sum + confirmation.acceptedQuantity, 0)) && (
                             <Button
                               variant="primary"
                               onClick={() => setReceipt({ order: selected, line })}
