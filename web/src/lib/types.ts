@@ -158,6 +158,7 @@ export type RequisitionLine = {
   purchaseUrl: string;
 };
 export type Requisition = {
+  amazonPunchoutSessionId?: number;
   id: number;
   number: string;
   title: string;
@@ -184,6 +185,8 @@ export type OrderLine = {
   purchaseUrl: string;
 };
 export type Order = {
+  amazonPunchoutSessionId?: number;
+  amazonPayloadId?: string;
   id: number;
   number: string;
   supplierOrderNumber: string;

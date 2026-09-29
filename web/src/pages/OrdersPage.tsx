@@ -24,6 +24,7 @@ import type {
 import { Badge, Button, Empty, Field, Modal } from "../components/ui";
 import { useApp } from "../App";
 import AdamHallOrderModal, { isAdamHallSupplier } from "../components/AdamHallOrderModal";
+import AmazonOrderModal from "../components/AmazonOrderModal";
 
 const statusLabel: Record<string, string> = {
   draft: "Entwurf",
@@ -74,6 +75,7 @@ export default function OrdersPage() {
   const [create, setCreate] = useState<"manual" | OrderImportPreview | null>(null);
   const [pdfImport, setPDFImport] = useState(false);
   const [adamHallOrder, setAdamHallOrder] = useState<Order | null>(null);
+  const [amazonOrder, setAmazonOrder] = useState<Order | null>(null);
   const [receipt, setReceipt] = useState<{
     order: Order;
     line: OrderLine;
@@ -188,7 +190,12 @@ export default function OrdersPage() {
                   <ShoppingCart size={16} /> Adam-Hall-Warenkorb
                 </Button>
               )}
-              {user.isAdmin && selected.status === "draft" && (
+              {user.isAdmin && selected.status === "draft" && selected.amazonPunchoutSessionId && (
+                <Button variant="primary" onClick={() => setAmazonOrder(selected)}>
+                  <ShoppingCart size={16} /> An Amazon übertragen
+                </Button>
+              )}
+              {user.isAdmin && selected.status === "draft" && !selected.amazonPunchoutSessionId && (
                 <Button
                   variant={isAdamHallSupplier(selected.supplier) ? "ghost" : "primary"}
                   onClick={() => void update(selected, "sent")}
@@ -204,7 +211,7 @@ export default function OrdersPage() {
                   <Truck size={16} /> Bestätigt
                 </Button>
               )}
-              {user.isAdmin && selected.status === "submission_unknown" && (
+              {user.isAdmin && selected.status === "submission_unknown" && !selected.amazonPunchoutSessionId && (
                 <>
                   <a className="btn ghost" href="https://www.adamhall.com/shop/de/account/order" target="_blank" rel="noreferrer">
                     <ExternalLink size={16} /> Adam Hall prüfen
@@ -221,6 +228,7 @@ export default function OrdersPage() {
                 </>
               )}
               {user.isAdmin &&
+                !selected.amazonPunchoutSessionId &&
                 !["received", "cancelled", "submission_unknown"].includes(selected.status) && (
                   <Button
                     variant="danger"
@@ -352,6 +360,11 @@ export default function OrdersPage() {
             refresh();
           }}
         />
+      )}
+      {amazonOrder && (
+        <AmazonOrderModal order={amazonOrder} onClose={() => setAmazonOrder(null)} onOrdered={result => {
+          setAmazonOrder(null); setSelected(result); notify(`An Amazon übertragen: ${result.number}`); refresh();
+        }} />
       )}
       {adamHallOrder && (
         <AdamHallOrderModal

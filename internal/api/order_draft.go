@@ -49,6 +49,9 @@ func (h *Handler) updateOrderDraft(w http.ResponseWriter, r *http.Request) {
 		if row.Status != "draft" {
 			return &receiptFlowError{status: http.StatusConflict, code: "order_not_draft", message: "Nur Bestellentwürfe können vollständig geändert werden"}
 		}
+		if row.AmazonPunchoutSessionID != nil {
+			return &receiptFlowError{status: http.StatusConflict, code: "amazon_cart_locked", message: "Amazon-Warenkorb kann nach PunchOut nicht verändert werden"}
+		}
 		if err := validateExpectedUpdate(row.UpdatedAt, input.ExpectedUpdatedAt, isMCPMutation(r)); err != nil {
 			return err
 		}

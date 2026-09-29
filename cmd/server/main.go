@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"procurementcore/internal/amazon"
 	"procurementcore/internal/api"
 	"procurementcore/internal/auth"
 	"procurementcore/internal/config"
@@ -26,7 +27,7 @@ import (
 	"github.com/rs/zerolog"
 )
 
-const version = "1.0.55"
+const version = "1.0.56"
 
 const procurementMountPath = "/procurementcore"
 
@@ -112,7 +113,13 @@ func main() {
 		AdamHallUsername: cfg.AdamHallUsername,
 		AdamHallPassword: cfg.AdamHallPassword,
 	})
-	mux.Handle("/api/v1/", http.StripPrefix("/api/v1", auth.Middleware(commonjwt.DatabaseUserLookup(sqlDB), api.NewHandler(db, productScraper).Routes())))
+	amazonClient, err := amazon.FromEnv()
+	if err != nil {
+		log.Fatal().Err(err).Msg("invalid Amazon PunchOut configuration")
+	}
+	apiHandler := api.NewHandler(db, productScraper, amazonClient)
+	mux.HandleFunc("POST /api/v1/amazon/punchout/return", apiHandler.HandleAmazonReturn)
+	mux.Handle("/api/v1/", http.StripPrefix("/api/v1", auth.Middleware(commonjwt.DatabaseUserLookup(sqlDB), apiHandler.Routes())))
 
 	mux.Handle("GET /assets/", assets)
 	mux.Handle("GET /procurementcore/assets/", http.StripPrefix(procurementMountPath, assets))

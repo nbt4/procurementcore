@@ -1,5 +1,47 @@
 # ProcurementCore
 
+## Amazon Business PunchOut (1.0.56)
+
+Der Button **Amazon Business** startet aus den Bedarfsmeldungen eine cXML-
+PunchOut-Sitzung für die E-Mail-Adresse des angemeldeten Benutzers. Amazon
+übergibt den Warenkorb an den öffentlichen Rückgabe-Endpunkt; ProcurementCore
+erzeugt daraus genau einen Bedarfsentwurf mit den von Amazon gelieferten
+Einzelpreisen. Die Amazon-Artikelkennung und `SupplierPartAuxiliaryID` bleiben
+in Bedarf und Bestellung erhalten. Nach Einreichen, Freigabe und Umwandlung
+in eine Bestellung überträgt ein Administrator diese über den gesonderten
+Amazon-Dialog. Unklare Übertragungen bleiben gesperrt und müssen im Amazon-
+Business-Konto geprüft werden, bevor sie manuell geklärt werden.
+
+Konfiguration erfolgt ausschließlich über Laufzeitvariablen:
+
+| Variable | Bedeutung |
+| --- | --- |
+| `AMAZON_PUNCHOUT_FROM_IDENTITY` | cXML From/Sender Identity aus Amazon Business |
+| `AMAZON_PUNCHOUT_SHARED_SECRET` | cXML Shared Secret, ausschließlich im Secret-Store |
+| `AMAZON_PUNCHOUT_ORDER_URL` | Kontospezifische Bestellanforderungs-URL |
+| `AMAZON_PUNCHOUT_RETURN_URL` | Öffentliche HTTPS-URL auf `/api/v1/amazon/punchout/return` |
+| `AMAZON_PUNCHOUT_MODE` | `test` (Standard) oder `production` |
+| `AMAZON_SHIP_TO_*` | Firma, Straße, PLZ, Ort, ISO-Ländercode und optionale E-Mail |
+
+Die Rückgabe-URL muss von Amazon per HTTPS erreichbar sein. Der Endpunkt ist
+öffentlich, akzeptiert aber nur eine einmalig verwendbare, zufällige Sitzung
+mit zweistündiger Gültigkeit. Der Klartext der Sitzung wird nicht gespeichert.
+Pro Benutzer muss im Cores-Konto eine Amazon-Business-E-Mail-Adresse hinterlegt
+sein. Die Rechnungsadresse entspricht standardmäßig der Lieferadresse; bei
+abweichender Adresse können `AMAZON_BILL_TO_COMPANY`, `_STREET`, `_POSTAL_CODE`,
+`_CITY`, `_COUNTRY` und `_EMAIL` gesetzt werden. Im Amazon-Business-Konto muss
+die Einkaufsgruppe als Other Purchasing System mit passenden Standardwerten
+für Zahlung und Checkout eingerichtet sein. Erst nach erfolgreichem Test auf
+`production` umstellen. Testbestellungen werden von Amazon automatisch
+storniert. Die Start-URLs für Deutschland sind fest auf die offiziellen Amazon-
+Hosts begrenzt.
+
+**Ablauf:** Amazon Business öffnen → Warenkorb zurückgeben → Bedarfsentwurf
+prüfen/einreichen → freigeben → Amazon Business als Lieferant wählen →
+Bestellpositionen prüfen und ausdrücklich senden. Die ursprünglichen PDF-
+Angebotspreise aus dem Angebotsimport bleiben unabhängig davon als
+Bedarfspreise erhalten; PunchOut verwendet die Warenkorbpreise von Amazon.
+
 ## Bedarfe aus Angebots-PDFs (1.0.55)
 
 Administratoren können auf der Bedarfsseite ein Lieferantenangebot als PDF

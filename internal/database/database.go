@@ -27,6 +27,7 @@ func Open(dsn string) (*gorm.DB, error) {
 		&models.PriceHistory{}, &models.PriceAlert{}, &models.Requisition{},
 		&models.RequisitionLine{}, &models.PurchaseOrder{}, &models.PurchaseOrderLine{},
 		&models.Receipt{}, &models.Activity{}, &models.IdempotencyRecord{},
+		&models.AmazonPunchoutSession{},
 	); err != nil {
 		return nil, fmt.Errorf("migrate procurement schema: %w", err)
 	}

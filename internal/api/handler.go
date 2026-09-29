@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"procurementcore/internal/amazon"
 	"procurementcore/internal/auth"
 	"procurementcore/internal/jev"
 	"procurementcore/internal/models"
@@ -34,10 +35,11 @@ type Handler struct {
 	db      *gorm.DB
 	scraper *scraper.Fetcher
 	jev     *jev.Client
+	amazon  *amazon.Client
 }
 
-func NewHandler(db *gorm.DB, productScraper *scraper.Fetcher) *Handler {
-	return &Handler{db: db, scraper: productScraper, jev: jev.FromEnv()}
+func NewHandler(db *gorm.DB, productScraper *scraper.Fetcher, amazonClient *amazon.Client) *Handler {
+	return &Handler{db: db, scraper: productScraper, jev: jev.FromEnv(), amazon: amazonClient}
 }
 
 func (h *Handler) Routes() http.Handler {
@@ -72,6 +74,8 @@ func (h *Handler) Routes() http.Handler {
 	r.Put("/alerts/{id}", h.updateAlert)
 	r.Delete("/alerts/{id}", h.deleteAlert)
 	r.Get("/requisitions", h.listRequisitions)
+	r.Get("/amazon/punchout/config", h.amazonConfig)
+	r.Post("/amazon/punchout/start", h.startAmazonPunchout)
 	r.Get("/requisitions/{id}", h.getRequisition)
 	r.Post("/requisitions", h.createRequisition)
 	r.Post("/requisitions/offer-preview", h.previewRequisitionOffer)
@@ -88,6 +92,7 @@ func (h *Handler) Routes() http.Handler {
 	r.With(auth.RequireAdmin).Put("/orders/{id}/draft", h.updateOrderDraft)
 	r.With(auth.RequireAdmin).Post("/orders/{id}/adam-hall/cart", h.previewAdamHallOrder)
 	r.With(auth.RequireAdmin).Post("/orders/{id}/adam-hall/order", h.placeAdamHallOrder)
+	r.With(auth.RequireAdmin).Post("/orders/{id}/amazon/submit", h.submitAmazonOrder)
 	r.With(auth.RequireAdmin).Post("/orders/{id}/receipt", h.receiveOrder)
 	r.Get("/activity", h.listActivity)
 	r.Get("/export/spend.csv", h.exportSpend)
@@ -1481,12 +1486,14 @@ func (h *Handler) createRequisition(w http.ResponseWriter, r *http.Request) {
 			return json.Unmarshal(replay, &row)
 		}
 		row.ID, row.Number, row.Status = 0, nextNumber("BAN"), "draft"
+		row.AmazonPunchoutSessionID = nil
 		row.RequesterID, row.RequesterName = user.ID, user.Username
 		row.ApprovedBy, row.ApprovedByName, row.DecisionNote, row.SubmittedAt, row.DecidedAt = nil, "", "", nil, nil
 		row.CreatedAt, row.UpdatedAt = time.Time{}, time.Time{}
 		for i := range row.Lines {
 			row.Lines[i].ID, row.Lines[i].RequisitionID = 0, 0
 			row.Lines[i].Product = nil
+			row.Lines[i].SupplierPartID, row.Lines[i].SupplierPartAuxiliaryID = "", ""
 		}
 		if err := validateRequisitionReferences(tx, &row); err != nil {
 			return err
@@ -1540,7 +1547,7 @@ func (h *Handler) updateRequisition(w http.ResponseWriter, r *http.Request) {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Preload("Lines").First(&existing, id).Error; err != nil {
 			return err
 		}
-		if existing.Status != "draft" || (!user.IsAdmin && existing.RequesterID != user.ID) {
+		if existing.Status != "draft" || existing.AmazonPunchoutSessionID != nil || (!user.IsAdmin && existing.RequesterID != user.ID) {
 			return &receiptFlowError{status: http.StatusForbidden, code: "requisition_not_editable", message: "Nur eigene Entwürfe können geändert werden"}
 		}
 		if err := validateExpectedUpdate(existing.UpdatedAt, input.ExpectedUpdatedAt, isMCPMutation(r)); err != nil {
@@ -1729,11 +1736,19 @@ func (h *Handler) convertRequisition(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, "Nur freigegebene Bedarfe können bestellt werden")
 		return
 	}
+	if req.AmazonPunchoutSessionID != nil {
+		var amazonSupplier models.Supplier
+		if err := h.db.Where("code = ?", "AMAZON-BUSINESS").First(&amazonSupplier).Error; err != nil || input.SupplierID != amazonSupplier.ID {
+			badRequest(w, "Amazon-PunchOut-Bedarf muss über Amazon Business bestellt werden")
+			return
+		}
+	}
 	user := auth.CurrentUser(r)
 	order := models.PurchaseOrder{Number: nextNumber("PO"), SupplierID: input.SupplierID, RequisitionID: &req.ID, Status: "draft", Currency: "EUR", OrderedBy: user.ID, OrderedByName: user.Username, ExpectedDelivery: input.ExpectedDelivery}
+	order.AmazonPunchoutSessionID = req.AmazonPunchoutSessionID
 	for _, line := range req.Lines {
 		price, link := line.EstimatedPriceCents, line.PurchaseURL
-		if line.ProductID != nil {
+		if line.ProductID != nil && req.AmazonPunchoutSessionID == nil {
 			var offer models.Offer
 			if err := h.db.Where("product_id = ? AND supplier_id = ? AND active = ?", *line.ProductID, input.SupplierID, true).Order("price_cents").First(&offer).Error; err == nil {
 				if line.PreferredSupplierID == nil || *line.PreferredSupplierID != input.SupplierID {
@@ -1744,7 +1759,7 @@ func (h *Handler) convertRequisition(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-		order.Lines = append(order.Lines, models.PurchaseOrderLine{ProductID: line.ProductID, Description: line.Description, Quantity: line.Quantity, Unit: line.Unit, UnitPriceCents: price, PurchaseURL: link})
+		order.Lines = append(order.Lines, models.PurchaseOrderLine{ProductID: line.ProductID, SupplierPartID: line.SupplierPartID, SupplierPartAuxiliaryID: line.SupplierPartAuxiliaryID, Description: line.Description, Quantity: line.Quantity, Unit: line.Unit, UnitPriceCents: price, PurchaseURL: link})
 	}
 	order.TotalCents = service.PurchaseOrderTotal(order.Lines)
 	err := h.db.Transaction(func(tx *gorm.DB) error {
@@ -1943,6 +1958,7 @@ func (h *Handler) createOrder(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		row.ID, row.Number, row.OrderedBy, row.OrderedByName = 0, nextNumber("PO"), user.ID, user.Username
+		row.AmazonPunchoutSessionID, row.AmazonPayloadID = nil, ""
 		row.CreatedAt, row.UpdatedAt = time.Time{}, time.Time{}
 		row.Supplier = nil
 		if row.Status != "draft" && row.OrderDate == nil {
@@ -1952,6 +1968,7 @@ func (h *Handler) createOrder(w http.ResponseWriter, r *http.Request) {
 		for i := range row.Lines {
 			row.Lines[i].ID, row.Lines[i].PurchaseOrderID = 0, 0
 			row.Lines[i].Product = nil
+			row.Lines[i].SupplierPartID, row.Lines[i].SupplierPartAuxiliaryID = "", ""
 			row.Lines[i].ReceivedQuantity = 0
 		}
 		if err := tx.Create(&row).Error; err != nil {
@@ -2015,6 +2032,12 @@ func (h *Handler) updateOrder(w http.ResponseWriter, r *http.Request) {
 		}
 		if !orderTransitionAllowed(row.Status, input.Status) {
 			return &receiptFlowError{status: http.StatusConflict, code: "invalid_order_transition", message: "Dieser Bestellstatus-Übergang ist nicht zulässig"}
+		}
+		if row.AmazonPunchoutSessionID != nil && row.Status == "draft" && input.Status == "sent" {
+			return &receiptFlowError{status: http.StatusConflict, code: "amazon_punchout_required", message: "Amazon-Bestellung muss per PunchOut übertragen werden"}
+		}
+		if row.AmazonPunchoutSessionID != nil && row.Status == "submission_unknown" && input.Status == "draft" {
+			return &receiptFlowError{status: http.StatusConflict, code: "amazon_external_verification_required", message: "Unklare Amazon-Bestellung muss zuerst extern geklärt werden"}
 		}
 		if isMCPMutation(r) && row.Status == "submission_unknown" {
 			return &receiptFlowError{status: http.StatusForbidden, code: "external_verification_required", message: "Unklare externe Bestellung muss manuell geprüft werden"}

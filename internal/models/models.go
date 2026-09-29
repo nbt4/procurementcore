@@ -117,70 +117,77 @@ type PriceAlert struct {
 }
 
 type Requisition struct {
-	ID                  uint              `gorm:"primaryKey" json:"id"`
-	Number              string            `gorm:"size:40;unique;not null" json:"number"`
-	Title               string            `gorm:"size:240;not null" json:"title"`
-	Status              string            `gorm:"size:30;default:'draft';index" json:"status"`
-	RequesterID         uint              `gorm:"not null;index" json:"requesterId"`
-	RequesterName       string            `gorm:"size:160" json:"requesterName"`
-	CostCenter          string            `gorm:"size:80;index" json:"costCenter"`
-	Justification       string            `gorm:"type:text" json:"justification"`
-	NeededBy            *time.Time        `json:"neededBy"`
-	EstimatedTotalCents int64             `json:"estimatedTotalCents"`
-	ApprovedBy          *uint             `json:"approvedBy"`
-	ApprovedByName      string            `gorm:"size:160" json:"approvedByName"`
-	DecisionNote        string            `gorm:"type:text" json:"decisionNote"`
-	SubmittedAt         *time.Time        `json:"submittedAt"`
-	DecidedAt           *time.Time        `json:"decidedAt"`
-	CreatedAt           time.Time         `json:"createdAt"`
-	UpdatedAt           time.Time         `json:"updatedAt"`
-	Lines               []RequisitionLine `json:"lines"`
+	ID                      uint              `gorm:"primaryKey" json:"id"`
+	AmazonPunchoutSessionID *uint             `gorm:"uniqueIndex" json:"amazonPunchoutSessionId,omitempty"`
+	Number                  string            `gorm:"size:40;unique;not null" json:"number"`
+	Title                   string            `gorm:"size:240;not null" json:"title"`
+	Status                  string            `gorm:"size:30;default:'draft';index" json:"status"`
+	RequesterID             uint              `gorm:"not null;index" json:"requesterId"`
+	RequesterName           string            `gorm:"size:160" json:"requesterName"`
+	CostCenter              string            `gorm:"size:80;index" json:"costCenter"`
+	Justification           string            `gorm:"type:text" json:"justification"`
+	NeededBy                *time.Time        `json:"neededBy"`
+	EstimatedTotalCents     int64             `json:"estimatedTotalCents"`
+	ApprovedBy              *uint             `json:"approvedBy"`
+	ApprovedByName          string            `gorm:"size:160" json:"approvedByName"`
+	DecisionNote            string            `gorm:"type:text" json:"decisionNote"`
+	SubmittedAt             *time.Time        `json:"submittedAt"`
+	DecidedAt               *time.Time        `json:"decidedAt"`
+	CreatedAt               time.Time         `json:"createdAt"`
+	UpdatedAt               time.Time         `json:"updatedAt"`
+	Lines                   []RequisitionLine `json:"lines"`
 }
 
 type RequisitionLine struct {
-	ID                  uint     `gorm:"primaryKey" json:"id"`
-	RequisitionID       uint     `gorm:"not null;index" json:"requisitionId"`
-	ProductID           *uint    `gorm:"index" json:"productId"`
-	Product             *Product `json:"product,omitempty"`
-	Description         string   `gorm:"size:500;not null" json:"description"`
-	Quantity            float64  `gorm:"not null" json:"quantity"`
-	Unit                string   `gorm:"size:30" json:"unit"`
-	EstimatedPriceCents int64    `json:"estimatedPriceCents"`
-	PreferredSupplierID *uint    `json:"preferredSupplierId"`
-	PurchaseURL         string   `gorm:"size:2000" json:"purchaseUrl"`
+	ID                      uint     `gorm:"primaryKey" json:"id"`
+	SupplierPartID          string   `gorm:"size:120" json:"supplierPartId,omitempty"`
+	SupplierPartAuxiliaryID string   `gorm:"size:500" json:"supplierPartAuxiliaryId,omitempty"`
+	RequisitionID           uint     `gorm:"not null;index" json:"requisitionId"`
+	ProductID               *uint    `gorm:"index" json:"productId"`
+	Product                 *Product `json:"product,omitempty"`
+	Description             string   `gorm:"size:500;not null" json:"description"`
+	Quantity                float64  `gorm:"not null" json:"quantity"`
+	Unit                    string   `gorm:"size:30" json:"unit"`
+	EstimatedPriceCents     int64    `json:"estimatedPriceCents"`
+	PreferredSupplierID     *uint    `json:"preferredSupplierId"`
+	PurchaseURL             string   `gorm:"size:2000" json:"purchaseUrl"`
 }
 
 type PurchaseOrder struct {
-	ID                  uint                `gorm:"primaryKey" json:"id"`
-	Number              string              `gorm:"size:40;unique;not null" json:"number"`
-	SupplierOrderNumber string              `gorm:"size:120;index" json:"supplierOrderNumber"`
-	SupplierID          uint                `gorm:"not null;index" json:"supplierId"`
-	Supplier            *Supplier           `json:"supplier,omitempty"`
-	RequisitionID       *uint               `gorm:"index" json:"requisitionId"`
-	Status              string              `gorm:"size:30;default:'draft';index" json:"status"`
-	Currency            string              `gorm:"size:3;default:'EUR'" json:"currency"`
-	TotalCents          int64               `json:"totalCents"`
-	OrderedBy           uint                `json:"orderedBy"`
-	OrderedByName       string              `gorm:"size:160" json:"orderedByName"`
-	OrderDate           *time.Time          `json:"orderDate"`
-	ExpectedDelivery    *time.Time          `json:"expectedDelivery"`
-	Notes               string              `gorm:"type:text" json:"notes"`
-	CreatedAt           time.Time           `json:"createdAt"`
-	UpdatedAt           time.Time           `json:"updatedAt"`
-	Lines               []PurchaseOrderLine `json:"lines"`
+	ID                      uint                `gorm:"primaryKey" json:"id"`
+	AmazonPunchoutSessionID *uint               `gorm:"uniqueIndex" json:"amazonPunchoutSessionId,omitempty"`
+	AmazonPayloadID         string              `gorm:"size:100" json:"amazonPayloadId,omitempty"`
+	Number                  string              `gorm:"size:40;unique;not null" json:"number"`
+	SupplierOrderNumber     string              `gorm:"size:120;index" json:"supplierOrderNumber"`
+	SupplierID              uint                `gorm:"not null;index" json:"supplierId"`
+	Supplier                *Supplier           `json:"supplier,omitempty"`
+	RequisitionID           *uint               `gorm:"index" json:"requisitionId"`
+	Status                  string              `gorm:"size:30;default:'draft';index" json:"status"`
+	Currency                string              `gorm:"size:3;default:'EUR'" json:"currency"`
+	TotalCents              int64               `json:"totalCents"`
+	OrderedBy               uint                `json:"orderedBy"`
+	OrderedByName           string              `gorm:"size:160" json:"orderedByName"`
+	OrderDate               *time.Time          `json:"orderDate"`
+	ExpectedDelivery        *time.Time          `json:"expectedDelivery"`
+	Notes                   string              `gorm:"type:text" json:"notes"`
+	CreatedAt               time.Time           `json:"createdAt"`
+	UpdatedAt               time.Time           `json:"updatedAt"`
+	Lines                   []PurchaseOrderLine `json:"lines"`
 }
 
 type PurchaseOrderLine struct {
-	ID               uint     `gorm:"primaryKey" json:"id"`
-	PurchaseOrderID  uint     `gorm:"not null;index" json:"purchaseOrderId"`
-	ProductID        *uint    `gorm:"index" json:"productId"`
-	Product          *Product `json:"product,omitempty"`
-	Description      string   `gorm:"size:500;not null" json:"description"`
-	Quantity         float64  `json:"quantity"`
-	ReceivedQuantity float64  `json:"receivedQuantity"`
-	Unit             string   `gorm:"size:30" json:"unit"`
-	UnitPriceCents   int64    `json:"unitPriceCents"`
-	PurchaseURL      string   `gorm:"size:2000" json:"purchaseUrl"`
+	ID                      uint     `gorm:"primaryKey" json:"id"`
+	SupplierPartID          string   `gorm:"size:120" json:"supplierPartId,omitempty"`
+	SupplierPartAuxiliaryID string   `gorm:"size:500" json:"supplierPartAuxiliaryId,omitempty"`
+	PurchaseOrderID         uint     `gorm:"not null;index" json:"purchaseOrderId"`
+	ProductID               *uint    `gorm:"index" json:"productId"`
+	Product                 *Product `json:"product,omitempty"`
+	Description             string   `gorm:"size:500;not null" json:"description"`
+	Quantity                float64  `json:"quantity"`
+	ReceivedQuantity        float64  `json:"receivedQuantity"`
+	Unit                    string   `gorm:"size:30" json:"unit"`
+	UnitPriceCents          int64    `json:"unitPriceCents"`
+	PurchaseURL             string   `gorm:"size:2000" json:"purchaseUrl"`
 }
 
 type Receipt struct {
@@ -223,17 +230,30 @@ type IdempotencyRecord struct {
 	CreatedAt   time.Time       `gorm:"index" json:"createdAt"`
 }
 
-func (Supplier) TableName() string          { return "proc_suppliers" }
-func (Category) TableName() string          { return "proc_categories" }
-func (Product) TableName() string           { return "proc_products" }
-func (CoreProductLink) TableName() string   { return "core_product_links" }
-func (Offer) TableName() string             { return "proc_offers" }
-func (PriceHistory) TableName() string      { return "proc_price_histories" }
-func (PriceAlert) TableName() string        { return "proc_price_alerts" }
-func (Requisition) TableName() string       { return "proc_requisitions" }
-func (RequisitionLine) TableName() string   { return "proc_requisition_lines" }
-func (PurchaseOrder) TableName() string     { return "proc_purchase_orders" }
-func (PurchaseOrderLine) TableName() string { return "proc_purchase_order_lines" }
-func (Receipt) TableName() string           { return "proc_receipts" }
-func (Activity) TableName() string          { return "proc_activities" }
-func (IdempotencyRecord) TableName() string { return "proc_idempotency_records" }
+type AmazonPunchoutSession struct {
+	ID         uint      `gorm:"primaryKey" json:"id"`
+	TokenHash  string    `gorm:"size:64;uniqueIndex;not null" json:"-"`
+	UserID     uint      `gorm:"not null;index" json:"userId"`
+	Username   string    `gorm:"size:160" json:"username"`
+	BuyerEmail string    `gorm:"size:255" json:"buyerEmail"`
+	Status     string    `gorm:"size:30;not null;index" json:"status"`
+	ExpiresAt  time.Time `gorm:"not null;index" json:"expiresAt"`
+	CreatedAt  time.Time `json:"createdAt"`
+	UpdatedAt  time.Time `json:"updatedAt"`
+}
+
+func (Supplier) TableName() string              { return "proc_suppliers" }
+func (Category) TableName() string              { return "proc_categories" }
+func (Product) TableName() string               { return "proc_products" }
+func (CoreProductLink) TableName() string       { return "core_product_links" }
+func (Offer) TableName() string                 { return "proc_offers" }
+func (PriceHistory) TableName() string          { return "proc_price_histories" }
+func (PriceAlert) TableName() string            { return "proc_price_alerts" }
+func (Requisition) TableName() string           { return "proc_requisitions" }
+func (AmazonPunchoutSession) TableName() string { return "proc_amazon_punchout_sessions" }
+func (RequisitionLine) TableName() string       { return "proc_requisition_lines" }
+func (PurchaseOrder) TableName() string         { return "proc_purchase_orders" }
+func (PurchaseOrderLine) TableName() string     { return "proc_purchase_order_lines" }
+func (Receipt) TableName() string               { return "proc_receipts" }
+func (Activity) TableName() string              { return "proc_activities" }
+func (IdempotencyRecord) TableName() string     { return "proc_idempotency_records" }
