@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"math"
 	"net/http"
 	"sort"
@@ -37,16 +38,23 @@ func (h *Handler) HandleAmazonConfirmation(w http.ResponseWriter, r *http.Reques
 	}
 	username, password, basic := r.BasicAuth()
 	if h.amazon == nil || !(basic && h.amazon.VerifyConfirmationCredentials(username, password)) && !h.amazon.VerifyConfirmationCXML(data) {
+		status := "amazon_not_configured"
+		if h.amazon != nil {
+			status = h.amazon.ConfirmationCXMLAuthStatus(data)
+		}
+		log.Printf("Amazon confirmation rejected at authentication: cxml_status=%s basic_present=%t content_type=%q bytes=%d", status, basic, r.Header.Get("Content-Type"), len(data))
 		w.Header().Set("WWW-Authenticate", `Basic realm="ProcurementCore Amazon confirmation"`)
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 	confirmation, err := amazon.ParseConfirmation(data, h.amazon.BuyerIdentity())
 	if err != nil {
+		log.Printf("Amazon confirmation rejected at parsing: error=%q content_type=%q bytes=%d", err.Error(), r.Header.Get("Content-Type"), len(data))
 		http.Error(w, "Invalid cXML confirmation", http.StatusBadRequest)
 		return
 	}
 	if err := h.applyAmazonConfirmation(confirmation); err != nil {
+		log.Printf("Amazon confirmation rejected at reconciliation: error=%q", err.Error())
 		if errors.Is(err, errAmazonConfirmationMismatch) || errors.Is(err, gorm.ErrRecordNotFound) {
 			http.Error(w, "Unknown or conflicting purchase order", http.StatusConflict)
 			return

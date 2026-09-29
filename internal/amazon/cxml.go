@@ -114,8 +114,14 @@ func (c *Client) BuyerIdentity() string { return c.cfg.FromIdentity }
 // VerifyConfirmationCXML validates the credentials Amazon places in an
 // inbound cXML Header when "cXML Authentication" is selected in its UI.
 func (c *Client) VerifyConfirmationCXML(data []byte) bool {
+	return c.ConfirmationCXMLAuthStatus(data) == "valid"
+}
+
+// ConfirmationCXMLAuthStatus reports only a safe validation category. It never
+// includes the received credentials or cXML contents in diagnostic logs.
+func (c *Client) ConfirmationCXMLAuthStatus(data []byte) string {
 	if c == nil || len(data) == 0 || len(data) > maxCXMLBytes {
-		return false
+		return "missing_or_oversized_cxml"
 	}
 	var doc struct {
 		XMLName xml.Name `xml:"cXML"`
@@ -124,14 +130,24 @@ func (c *Client) VerifyConfirmationCXML(data []byte) bool {
 			Sender senderCredential `xml:"Sender>Credential"`
 		} `xml:"Header"`
 	}
-	if xml.Unmarshal(data, &doc) != nil || doc.XMLName.Local != "cXML" || doc.Header.Sender.SharedSecret == "" {
-		return false
+	if xml.Unmarshal(data, &doc) != nil || doc.XMLName.Local != "cXML" {
+		return "invalid_cxml"
+	}
+	if doc.Header.Sender.SharedSecret == "" {
+		return "missing_sender_secret"
 	}
 	// Amazon may put the configured identity in To or Sender, depending on
 	// the cXML message type. The SharedSecret must always be in Sender.
 	identity := doc.Header.To.Identity == c.cfg.FromIdentity || doc.Header.Sender.Identity == c.cfg.FromIdentity
 	secretHash, expectedHash := sha256.Sum256([]byte(doc.Header.Sender.SharedSecret)), sha256.Sum256([]byte(c.cfg.SharedSecret))
-	return identity && subtle.ConstantTimeCompare(secretHash[:], expectedHash[:]) == 1
+	secretMatches := subtle.ConstantTimeCompare(secretHash[:], expectedHash[:]) == 1
+	if !identity {
+		return "buyer_identity_mismatch"
+	}
+	if !secretMatches {
+		return "shared_secret_mismatch"
+	}
+	return "valid"
 }
 
 type credential struct {

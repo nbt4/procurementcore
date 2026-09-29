@@ -1,5 +1,11 @@
 # ProcurementCore
 
+Release `1.0.63` protokolliert bei abgewiesenen Amazon-cXML-
+Bestellbestätigungen die Verarbeitungsstufe und eine sichere Fehlerkategorie.
+Zugangsdaten und XML-Inhalte werden nicht protokolliert. So lassen sich
+Authentifizierungs-, Format- und Zuordnungsfehler bei der Zustellung einer
+bereits aufgegebenen Amazon-Bestellung unterscheiden.
+
 Release `1.0.62` erlaubt Administratoren, den eigenen eingereichten Bedarf
 selbst freizugeben, abzulehnen oder mit Begründung zurückzugeben. Für Amazon-
 PunchOut bedeutet das: Warenkorb als Bedarf einreichen, selbst freigeben und

@@ -54,8 +54,14 @@ func TestConfirmationCXMLCredentials(t *testing.T) {
 	if !client.VerifyConfirmationCXML([]byte(message)) {
 		t.Fatal("valid cXML credentials rejected")
 	}
+	if got := client.ConfirmationCXMLAuthStatus([]byte(message)); got != "valid" {
+		t.Fatalf("valid credentials: %s", got)
+	}
 	if client.VerifyConfirmationCXML([]byte(strings.Replace(message, "<SharedSecret>secret</SharedSecret>", "<SharedSecret>wrong</SharedSecret>", 1))) {
 		t.Fatal("wrong secret accepted")
+	}
+	if got := client.ConfirmationCXMLAuthStatus([]byte(strings.Replace(message, "<SharedSecret>secret</SharedSecret>", "<SharedSecret>wrong</SharedSecret>", 1))); got != "shared_secret_mismatch" {
+		t.Fatalf("wrong secret category: %s", got)
 	}
 	if client.VerifyConfirmationCXML([]byte(strings.Replace(message, "<Identity>buyer</Identity>", "<Identity>other</Identity>", 1))) {
 		t.Fatal("wrong identity accepted")
