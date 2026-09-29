@@ -13,9 +13,12 @@ import (
 	"testing"
 	"time"
 
+	"procurementcore/internal/auth"
 	"procurementcore/internal/models"
 
 	"github.com/go-chi/chi/v5"
+	jwtlib "github.com/golang-jwt/jwt/v5"
+	commonjwt "github.com/nbt4/cores-common/pkg/jwt"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -137,9 +140,17 @@ func TestRequisitionDraftMutationVersionAuditAndReplay(t *testing.T) {
 	if changed := call(http.MethodPut, path, "requisition-update-after-submit", updatePayload); changed.Code != http.StatusForbidden {
 		t.Fatalf("submitted requisition changed: %d %s", changed.Code, changed.Body.String())
 	}
-	if err := db.Exec("UPDATE proc_requisitions SET requester_id=1 WHERE id=?", row.ID).Error; err != nil {
+	if err := db.Exec("UPDATE proc_requisitions SET requester_id=7 WHERE id=?", row.ID).Error; err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv("CORES_JWT_SECRET", "requisition-test-secret-at-least-32-bytes")
+	rawToken, err := jwtlib.NewWithClaims(jwtlib.SigningMethodHS256, commonjwt.Claims{UserID: 7, RegisteredClaims: jwtlib.RegisteredClaims{ExpiresAt: jwtlib.NewNumericDate(time.Now().Add(time.Hour))}}).SignedString(commonjwt.JWTSecret())
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentUser := commonjwt.User{ID: 7, Username: "requester-admin", IsActive: true, IsAdmin: false}
+	lookup := func(context.Context, uint) (commonjwt.User, error) { return currentUser, nil }
+	decisionHandler := auth.Middleware(lookup, auth.RequireAdmin(http.HandlerFunc(h.decideRequisition)))
 	var submittedRow models.Requisition
 	if err := json.Unmarshal(submitted.Body.Bytes(), &submittedRow); err != nil {
 		t.Fatal(err)
@@ -153,16 +164,28 @@ func TestRequisitionDraftMutationVersionAuditAndReplay(t *testing.T) {
 		r := httptest.NewRequest(http.MethodPost, path+"/decision", bytes.NewReader(body))
 		r.Header.Set("X-Cores-Origin", "MCP/AI")
 		r.Header.Set("Idempotency-Key", key)
+		r.AddCookie(&http.Cookie{Name: "cores_token", Value: rawToken})
 		route := chi.NewRouteContext()
 		route.URLParams.Add("id", strconv.FormatUint(uint64(row.ID), 10))
 		r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, route))
 		w := httptest.NewRecorder()
-		h.decideRequisition(w, r)
+		decisionHandler.ServeHTTP(w, r)
 		return w
 	}
+	if denied := decide("requisition-decision-non-admin"); denied.Code != http.StatusForbidden {
+		t.Fatalf("non-admin decision: %d %s", denied.Code, denied.Body.String())
+	}
+	currentUser.IsAdmin = true
 	approved := decide("requisition-decision-001")
 	if approved.Code != http.StatusOK {
-		t.Fatalf("decision: %d %s", approved.Code, approved.Body.String())
+		t.Fatalf("self approval: %d %s", approved.Code, approved.Body.String())
+	}
+	var approvedRow models.Requisition
+	if err := json.Unmarshal(approved.Body.Bytes(), &approvedRow); err != nil {
+		t.Fatal(err)
+	}
+	if approvedRow.Status != "approved" || approvedRow.ApprovedBy == nil || *approvedRow.ApprovedBy != approvedRow.RequesterID {
+		t.Fatalf("own requisition was not approved by requester: %+v", approvedRow)
 	}
 	if replay := decide("requisition-decision-001"); replay.Code != http.StatusOK || replay.Body.String() != approved.Body.String() {
 		t.Fatalf("decision replay: %d %s", replay.Code, replay.Body.String())

@@ -1,5 +1,12 @@
 # ProcurementCore
 
+Release `1.0.62` erlaubt Administratoren, den eigenen eingereichten Bedarf
+selbst freizugeben, abzulehnen oder mit Begründung zurückzugeben. Für Amazon-
+PunchOut bedeutet das: Warenkorb als Bedarf einreichen, selbst freigeben und
+anschließend in eine Bestellung umwandeln. Administratorrolle, getrennte
+Einreichung, Statusprüfung, Versionsprüfung, Audit und Idempotenz bleiben
+erforderlich. Es findet keine automatische Freigabe beim Einreichen statt.
+
 Release `1.0.61` akzeptiert für Amazon-Business-Bestellbestätigungen und
 Versandmeldungen zusätzlich **CXML-Authentifizierung**. Procurement prüft
 dabei das `SharedSecret` aus `Header/Sender/Credential` und die konfigurierte
@@ -249,8 +256,9 @@ vollständig in der gewählten Suite-Sprache.
 ## Abgesicherte MCP-Freigaben und Wareneingänge (1.0.38)
 
 ProcurementCore unterstützt jetzt die eng begrenzten MCP-Lifecycle-Prozesse aus
-Cores MCP 1.5.0. Bedarfsentscheidungen erzwingen das Vier-Augen-Prinzip und
-akzeptieren neben Genehmigung und Ablehnung auch eine begründete Rückgabe.
+Cores MCP 1.5.0. Bedarfsentscheidungen akzeptieren neben Genehmigung und
+Ablehnung auch eine begründete Rückgabe; seit `1.0.62` dürfen Administratoren
+auch den eigenen Bedarf entscheiden.
 Entscheidungen und Wareneingänge prüfen die in der Vorschau gelesene
 `expectedUpdatedAt`-Version. MCP/KI-Aufrufe benötigen außerdem einen
 `Idempotency-Key`; Schlüssel, Payload-Hash und Antwort werden in derselben
@@ -369,7 +377,7 @@ ProcurementCore ist der Einkaufs-Service des Cores-Ökosystems. Er verbindet Bed
 - Lieferantenstamm mit Preferred-Status, Konditionen, Lieferzeit, Bewertung und Risiko
 - Mehrere Angebote pro Artikel mit Einkaufslink, Mindestmenge, Packgröße und Preisverlauf
 - Tiefpreis-Alarme, die bei neuen oder geänderten Angeboten automatisch auslösen
-- Bedarfsmeldungen mit Entwurf, Einreichung, Vier-Augen-Freigabe, Ablehnung, begründeter Rückgabe, Bestellkonvertierung und direkten Links von Katalogpositionen zum Artikel sowie zur hinterlegten Produktseite
+- Bedarfsmeldungen mit Entwurf, Einreichung, Administratorfreigabe (auch für eigene Bedarfe), Ablehnung, begründeter Rückgabe, Bestellkonvertierung und direkten Links von Katalogpositionen zum Artikel sowie zur hinterlegten Produktseite
 - Nachträgliche Bestellerfassung aus maschinenlesbaren PDFs mit automatischer Lieferanten-, Metadaten-, Positions- und Katalogerkennung sowie editierbarer Prüfung vor dem Speichern
 - Optionaler Jev-Entscheidungsabgleich für noch offene PDF-Positionen und Warehouse-Kandidaten, mit Confidence-Schwelle und deterministischem Fallback
 - Server-seitig erzeugte Adam-Hall-Warenkörbe für freigegebene Bedarfe und Bestellungsentwürfe: Konto, Lieferadresse, Zahlungsart, Positionen und Live-Gesamtpreis werden vor der verbindlichen Übertragung geprüft; der Warenkorb lässt sich zusätzlich im offiziellen Shop öffnen, und die Adam-Hall-Bestellnummer sowie finalen Preise fließen zurück in ProcurementCore

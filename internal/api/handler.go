@@ -1684,9 +1684,6 @@ func (h *Handler) decideRequisition(w http.ResponseWriter, r *http.Request) {
 		if row.Status != "submitted" {
 			return &receiptFlowError{status: http.StatusConflict, code: "requisition_not_submitted", message: "Bedarf ist nicht zur Entscheidung eingereicht"}
 		}
-		if row.RequesterID == user.ID {
-			return &receiptFlowError{status: http.StatusForbidden, code: "separation_of_duties", message: "Anfordernde dürfen den eigenen Bedarf nicht freigeben oder ablehnen"}
-		}
 		if versionErr := validateExpectedUpdate(row.UpdatedAt, input.ExpectedUpdatedAt, isMCPMutation(r)); versionErr != nil {
 			return versionErr
 		}
