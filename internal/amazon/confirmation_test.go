@@ -23,6 +23,19 @@ func TestParseConfirmation(t *testing.T) {
 	}
 }
 
+func TestParseConfirmationAcceptsCXMLTimezoneWithoutColon(t *testing.T) {
+	items := `<ConfirmationItem lineNumber="1" quantity="1"><ConfirmationStatus type="accept" quantity="1" deliveryDate="2026-10-03T12:00:00.000+0200"/></ConfirmationItem>`
+	message := string(confirmationXML("detail", items))
+	message = strings.Replace(message, `noticeDate="2026-09-29T12:00:00Z"`, `noticeDate="2026-09-29T12:00:00+0000"`, 1)
+	got, err := ParseConfirmation([]byte(message), "buyer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.NoticeDate == nil || got.Lines[0].Delivery == nil || got.Lines[0].Delivery.Format("-07:00") != "+02:00" {
+		t.Fatalf("dates not parsed: %+v", got)
+	}
+}
+
 func TestParseConfirmationRejectsSpoofedOrInvalidMessages(t *testing.T) {
 	valid := string(confirmationXML("detail", `<ConfirmationItem lineNumber="1" quantity="1"><ConfirmationStatus type="accept" quantity="1"/></ConfirmationItem>`))
 	cases := []struct{ name, xml, buyer string }{

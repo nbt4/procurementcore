@@ -1,5 +1,10 @@
 # ProcurementCore
 
+Release `1.0.64` akzeptiert in Amazon-cXML-Bestellbestätigungen und
+Versandmeldungen ISO-8601-Zeitzonen ohne Doppelpunkt (z. B. `+0200`). Dieses
+Datumsformat hatte die automatische Übernahme einer tatsächlich bei Amazon
+eingegangenen Bestellung verhindert.
+
 Release `1.0.63` protokolliert bei abgewiesenen Amazon-cXML-
 Bestellbestätigungen die Verarbeitungsstufe und eine sichere Fehlerkategorie.
 Zugangsdaten und XML-Inhalte werden nicht protokolliert. So lassen sich

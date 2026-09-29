@@ -71,12 +71,33 @@ func parseConfirmationDate(raw string) (*time.Time, error) {
 	if raw == "" {
 		return nil, nil
 	}
+	// cXML suppliers also emit ISO-8601 offsets without the RFC 3339 colon.
+	// Normalize that representation before parsing fractional seconds.
+	if len(raw) >= 5 && (raw[len(raw)-5] == '+' || raw[len(raw)-5] == '-') {
+		offset := raw[len(raw)-4:]
+		if strings.IndexFunc(offset, func(r rune) bool { return r < '0' || r > '9' }) == -1 {
+			raw = raw[:len(raw)-2] + ":" + raw[len(raw)-2:]
+		}
+	}
 	for _, layout := range []string{time.RFC3339Nano, "2006-01-02"} {
 		if value, err := time.Parse(layout, raw); err == nil {
 			return &value, nil
 		}
 	}
-	return nil, errors.New("invalid date")
+	var shape strings.Builder
+	for _, char := range raw {
+		if char >= '0' && char <= '9' {
+			shape.WriteByte('0')
+		} else if strings.ContainsRune("TtZz:+-. ", char) {
+			shape.WriteRune(char)
+		} else {
+			shape.WriteByte('?')
+		}
+		if shape.Len() >= 64 {
+			break
+		}
+	}
+	return nil, fmt.Errorf("invalid date format %q", shape.String())
 }
 
 func confirmationQuantity(raw string) (float64, error) {
