@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"log"
 	"math"
 	"net/http"
 	"strings"
@@ -85,15 +86,20 @@ func (h *Handler) HandleAmazonReturn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var data []byte
-	if value := r.PostForm.Get("cXML-urlencoded"); value != "" {
-		data = []byte(value)
-	}
-	if value := r.PostForm.Get("cXML-base64"); value != "" && len(data) == 0 {
-		var err error
-		data, err = base64.StdEncoding.DecodeString(value)
-		if err != nil {
-			http.Error(w, "Ungültige Amazon-Rückgabe", http.StatusBadRequest)
-			return
+	for name, values := range r.PostForm {
+		if len(values) == 0 || values[0] == "" {
+			continue
+		}
+		switch {
+		case strings.EqualFold(name, "cXML-urlencoded"):
+			data = []byte(values[0])
+		case strings.EqualFold(name, "cXML-base64") && len(data) == 0:
+			var decodeErr error
+			data, decodeErr = base64.StdEncoding.DecodeString(values[0])
+			if decodeErr != nil {
+				http.Error(w, "Ungültige Amazon-Rückgabe", http.StatusBadRequest)
+				return
+			}
 		}
 	}
 	if len(data) == 0 {
@@ -104,8 +110,16 @@ func (h *Handler) HandleAmazonReturn(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if len(data) == 0 {
+		keys := make([]string, 0, len(r.PostForm))
+		for key := range r.PostForm {
+			keys = append(keys, key)
+		}
+		log.Printf("Amazon PunchOut callback without cXML: content-type=%q content-length=%d form-keys=%q", r.Header.Get("Content-Type"), r.ContentLength, keys)
+	}
 	cart, err := amazon.ParseCart(data)
 	if err != nil {
+		log.Printf("Amazon PunchOut callback rejected: cxml-bytes=%d error=%q", len(data), err.Error())
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -147,7 +161,11 @@ func (h *Handler) HandleAmazonReturn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	http.Redirect(w, r, fmt.Sprintf("/requisitions?amazon=imported&id=%d", reqID), http.StatusSeeOther)
+	prefix := ""
+	if strings.TrimSuffix(r.Header.Get("X-Forwarded-Prefix"), "/") == "/procurementcore" {
+		prefix = "/procurementcore"
+	}
+	http.Redirect(w, r, fmt.Sprintf("%s/requisitions?amazon=imported&id=%d", prefix, reqID), http.StatusSeeOther)
 }
 
 func (h *Handler) submitAmazonOrder(w http.ResponseWriter, r *http.Request) {

@@ -1,5 +1,12 @@
 # ProcurementCore
 
+Release `1.0.58` akzeptiert die gemäß cXML-Standard unabhängig von Groß- und
+Kleinschreibung benannten Formularfelder der Amazon-Warenkorb-Rückgabe.
+Amazon postet den Warenkorb an
+`https://cores.tsunami-events.de/procurementcore/api/v1/amazon/punchout/return`;
+der Browser kehrt danach zur ProcurementCore-Bedarfsseite unter demselben
+zentralen Pfad zurück.
+
 Release `1.0.57` liest die Amazon-Business-E-Mail über den gemeinsamen
 Benutzerschlüssel `users.userid` und prüft diesen Zugriff im PostgreSQL-Test.
 
@@ -22,7 +29,7 @@ Konfiguration erfolgt ausschließlich über Laufzeitvariablen:
 | `AMAZON_PUNCHOUT_FROM_IDENTITY` | cXML From/Sender Identity aus Amazon Business |
 | `AMAZON_PUNCHOUT_SHARED_SECRET` | cXML Shared Secret, ausschließlich im Secret-Store |
 | `AMAZON_PUNCHOUT_ORDER_URL` | Kontospezifische Bestellanforderungs-URL |
-| `AMAZON_PUNCHOUT_RETURN_URL` | Öffentliche HTTPS-URL auf `/api/v1/amazon/punchout/return` |
+| `AMAZON_PUNCHOUT_RETURN_URL` | Öffentliche HTTPS-URL auf `/procurementcore/api/v1/amazon/punchout/return` |
 | `AMAZON_PUNCHOUT_MODE` | `test` (Standard) oder `production` |
 | `AMAZON_SHIP_TO_*` | Firma, Straße, PLZ, Ort, ISO-Ländercode und optionale E-Mail |
 
@@ -363,7 +370,7 @@ docker build -t nobentie/procurementcore:latest .
 docker run --rm -p 8084:8084 --env-file .env nobentie/procurementcore:latest
 ```
 
-Im Gesamt-Stack läuft ProcurementCore als eigener Compose-Service auf Host-Port `8084`. Dasselbe Image arbeitet im globalen Subdomainmodus unter seiner `PROCUREMENTCORE_PUBLIC_URL` oder im Pfadmodus hinter dem Dashboard-Gateway unter `/procurementcore/`.
+Im Gesamt-Stack läuft ProcurementCore als eigener Compose-Service auf Host-Port `8084`. Öffentlich ist er hinter dem Dashboard-Gateway unter `https://cores.tsunami-events.de/procurementcore/` erreichbar.
 
 ## API
 

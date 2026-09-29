@@ -65,16 +65,18 @@ func TestAmazonReturnCreatesOnePricedRequisition(t *testing.T) {
 		t.Fatal(err)
 	}
 	cart := `<cXML><Message><PunchOutOrderMessage><BuyerCookie>cookie</BuyerCookie><PunchOutOrderMessageHeader><Total><Money currency="EUR">24.68</Money></Total></PunchOutOrderMessageHeader><ItemIn quantity="2"><ItemID><SupplierPartID>B01</SupplierPartID><SupplierPartAuxiliaryID>opaque-token</SupplierPartAuxiliaryID></ItemID><ItemDetail><UnitPrice><Money currency="EUR">12.34</Money></UnitPrice><Description xml:lang="de">Adapter</Description><UnitOfMeasure>EA</UnitOfMeasure></ItemDetail></ItemIn></PunchOutOrderMessage></Message></cXML>`
-	form := url.Values{"cXML-urlencoded": []string{cart}}.Encode()
+	// Amazon and other cXML suppliers use either cXML or cxml in form names.
+	form := url.Values{"cxml-urlencoded": []string{cart}}.Encode()
 	call := func() *httptest.ResponseRecorder {
 		r := httptest.NewRequest(http.MethodPost, "/api/v1/amazon/punchout/return", strings.NewReader(form))
 		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		r.Header.Set("X-Forwarded-Prefix", "/procurementcore")
 		w := httptest.NewRecorder()
 		h.HandleAmazonReturn(w, r)
 		return w
 	}
-	if w := call(); w.Code != http.StatusSeeOther {
-		t.Fatalf("first callback: %d %s", w.Code, w.Body.String())
+	if w := call(); w.Code != http.StatusSeeOther || !strings.HasPrefix(w.Header().Get("Location"), "/procurementcore/requisitions?") {
+		t.Fatalf("first callback: %d location=%q %s", w.Code, w.Header().Get("Location"), w.Body.String())
 	}
 	var req models.Requisition
 	if err := db.Preload("Lines").First(&req).Error; err != nil {
