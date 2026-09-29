@@ -46,11 +46,20 @@ func TestAmazonReturnCreatesOnePricedRequisition(t *testing.T) {
 	if err := db.AutoMigrate(&models.Supplier{}, &models.Requisition{}, &models.RequisitionLine{}, &models.AmazonPunchoutSession{}, &models.Activity{}); err != nil {
 		t.Fatal(err)
 	}
+	if err := db.Exec("CREATE TABLE users (userid BIGINT PRIMARY KEY, email VARCHAR(255) NOT NULL)").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec("INSERT INTO users(userid, email) VALUES (7, 'noah@example.com')").Error; err != nil {
+		t.Fatal(err)
+	}
 	client, err := amazon.New(amazon.Config{FromIdentity: "buyer", SharedSecret: "private", TestURL: "http://localhost/test", LiveURL: "http://localhost/live", ReturnURL: "http://localhost/return", AllowHTTP: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	h := &Handler{db: db, amazon: client}
+	if email, err := h.amazonBuyerEmail(7); err != nil || email != "noah@example.com" {
+		t.Fatalf("buyer email lookup: %q %v", email, err)
+	}
 	session := models.AmazonPunchoutSession{TokenHash: tokenHash("cookie"), UserID: 7, Username: "Noah", BuyerEmail: "noah@example.com", Status: "started", ExpiresAt: time.Now().Add(time.Hour)}
 	if err := db.Create(&session).Error; err != nil {
 		t.Fatal(err)

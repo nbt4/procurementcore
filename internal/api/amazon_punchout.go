@@ -41,8 +41,8 @@ func (h *Handler) startAmazonPunchout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user := auth.CurrentUser(r)
-	var buyer struct{ Email string }
-	if err := h.db.Raw("SELECT email FROM users WHERE id = ?", user.ID).Scan(&buyer).Error; err != nil || buyer.Email == "" {
+	buyerEmail, err := h.amazonBuyerEmail(user.ID)
+	if err != nil || buyerEmail == "" {
 		badRequest(w, "Für dein Benutzerkonto fehlt eine E-Mail-Adresse")
 		return
 	}
@@ -52,18 +52,24 @@ func (h *Handler) startAmazonPunchout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cookie := hex.EncodeToString(random[:])
-	session := models.AmazonPunchoutSession{TokenHash: tokenHash(cookie), UserID: user.ID, Username: user.Username, BuyerEmail: buyer.Email, Status: "started", ExpiresAt: time.Now().Add(2 * time.Hour)}
+	session := models.AmazonPunchoutSession{TokenHash: tokenHash(cookie), UserID: user.ID, Username: user.Username, BuyerEmail: buyerEmail, Status: "started", ExpiresAt: time.Now().Add(2 * time.Hour)}
 	if err := h.db.Create(&session).Error; err != nil {
 		serverError(w, err)
 		return
 	}
-	startURL, err := h.amazon.Start(r.Context(), buyer.Email, cookie)
+	startURL, err := h.amazon.Start(r.Context(), buyerEmail, cookie)
 	if err != nil {
 		_ = h.db.Model(&session).Update("status", "failed").Error
 		badRequest(w, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"url": startURL})
+}
+
+func (h *Handler) amazonBuyerEmail(userID uint) (string, error) {
+	var buyer struct{ Email string }
+	err := h.db.Raw("SELECT email FROM users WHERE userid = ?", userID).Scan(&buyer).Error
+	return buyer.Email, err
 }
 
 // HandleAmazonReturn is public because Amazon posts this form across sites.

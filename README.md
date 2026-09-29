@@ -1,5 +1,8 @@
 # ProcurementCore
 
+Release `1.0.57` liest die Amazon-Business-E-Mail über den gemeinsamen
+Benutzerschlüssel `users.userid` und prüft diesen Zugriff im PostgreSQL-Test.
+
 ## Amazon Business PunchOut (1.0.56)
 
 Der Button **Amazon Business** startet aus den Bedarfsmeldungen eine cXML-
