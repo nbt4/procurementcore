@@ -1,5 +1,15 @@
 # ProcurementCore
 
+## PostgreSQL-Startschutz für PunchOut — 1.0.65
+
+Die Modelle erhalten die durch Migrationen installierten UNIQUE-Constraints für
+Amazon-PunchOut-Zuordnungen, Session-Token-Hashes und Confirmation-Payload-IDs.
+Damit startet ProcurementCore auch auf einer frisch durch die Umbrella-Migrationen
+angelegten Datenbank und wiederholt die Initialisierung ohne Constraint-Verlust.
+Bestehende Daten und die fachliche Eindeutigkeit bleiben erhalten; es ist keine
+neue Migration erforderlich.
+
+
 Release `1.0.64` akzeptiert in Amazon-cXML-Bestellbestätigungen und
 Versandmeldungen ISO-8601-Zeitzonen ohne Doppelpunkt (z. B. `+0200`). Dieses
 Datumsformat hatte die automatische Übernahme einer tatsächlich bei Amazon

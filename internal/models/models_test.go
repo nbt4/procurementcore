@@ -17,6 +17,10 @@ func TestDatabaseUniqueColumnsUseConstraintSemantics(t *testing.T) {
 		{Product{}, "SKU"},
 		{Requisition{}, "Number"},
 		{PurchaseOrder{}, "Number"},
+		{Requisition{}, "AmazonPunchoutSessionID"},
+		{PurchaseOrder{}, "AmazonPunchoutSessionID"},
+		{AmazonPunchoutSession{}, "TokenHash"},
+		{AmazonConfirmationEvent{}, "PayloadID"},
 	}
 
 	for _, test := range tests {

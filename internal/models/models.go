@@ -118,7 +118,7 @@ type PriceAlert struct {
 
 type Requisition struct {
 	ID                      uint              `gorm:"primaryKey" json:"id"`
-	AmazonPunchoutSessionID *uint             `gorm:"uniqueIndex" json:"amazonPunchoutSessionId,omitempty"`
+	AmazonPunchoutSessionID *uint             `gorm:"unique" json:"amazonPunchoutSessionId,omitempty"`
 	Number                  string            `gorm:"size:40;unique;not null" json:"number"`
 	Title                   string            `gorm:"size:240;not null" json:"title"`
 	Status                  string            `gorm:"size:30;default:'draft';index" json:"status"`
@@ -155,7 +155,7 @@ type RequisitionLine struct {
 
 type PurchaseOrder struct {
 	ID                      uint                `gorm:"primaryKey" json:"id"`
-	AmazonPunchoutSessionID *uint               `gorm:"uniqueIndex" json:"amazonPunchoutSessionId,omitempty"`
+	AmazonPunchoutSessionID *uint               `gorm:"unique" json:"amazonPunchoutSessionId,omitempty"`
 	AmazonPayloadID         string              `gorm:"size:100" json:"amazonPayloadId,omitempty"`
 	Number                  string              `gorm:"size:40;unique;not null" json:"number"`
 	SupplierOrderNumber     string              `gorm:"size:120;index" json:"supplierOrderNumber"`
@@ -210,7 +210,7 @@ type AmazonLineConfirmation struct {
 
 type AmazonConfirmationEvent struct {
 	ID              uint   `gorm:"primaryKey"`
-	PayloadID       string `gorm:"size:255;not null;uniqueIndex"`
+	PayloadID       string `gorm:"size:255;not null;unique"`
 	PurchaseOrderID uint   `gorm:"not null;index"`
 	ConfirmID       string `gorm:"size:120"`
 	Type            string `gorm:"size:30;not null"`
@@ -272,7 +272,7 @@ type IdempotencyRecord struct {
 
 type AmazonPunchoutSession struct {
 	ID         uint      `gorm:"primaryKey" json:"id"`
-	TokenHash  string    `gorm:"size:64;uniqueIndex;not null" json:"-"`
+	TokenHash  string    `gorm:"size:64;unique;not null" json:"-"`
 	UserID     uint      `gorm:"not null;index" json:"userId"`
 	Username   string    `gorm:"size:160" json:"username"`
 	BuyerEmail string    `gorm:"size:255" json:"buyerEmail"`
