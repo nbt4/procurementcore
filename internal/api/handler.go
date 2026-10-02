@@ -47,6 +47,7 @@ func (h *Handler) Routes() http.Handler {
 	r.With(auth.RequireAdmin).Post("/mcp/master-data/{entity}/{operation}", h.masterLifecycle)
 	r.With(auth.RequireAdmin).Post("/mcp/orders/receive", h.goodsReceiptMCP)
 	r.Post("/mcp/workflows/{entity}/{operation}", h.workflowLifecycleMCP)
+	r.With(auth.RequireAdmin).Post("/mcp/approvals/{entity}", h.approvalMCP)
 	r.Get("/me", h.me)
 	r.Get("/dashboard", h.dashboard)
 	r.Get("/categories", h.listCategories)
@@ -85,13 +86,13 @@ func (h *Handler) Routes() http.Handler {
 	r.With(auth.RequireAdmin).Post("/requisitions/from-offer", h.createRequisitionFromOffer)
 	r.Put("/requisitions/{id}", h.updateRequisition)
 	r.Post("/requisitions/{id}/submit", h.submitRequisition)
-	r.With(auth.RequireAdmin).Post("/requisitions/{id}/decision", h.decideRequisition)
+	r.With(auth.RequireAdmin, h.onlyLegacyApprovalReplay("requisitions")).Post("/requisitions/{id}/decision", h.decideRequisition)
 	r.With(auth.RequireAdmin).Post("/requisitions/{id}/order", h.convertRequisition)
 	r.Get("/orders", h.listOrders)
 	r.Get("/orders/{id}", h.getOrder)
 	r.With(auth.RequireAdmin).Post("/orders/import-preview", h.previewOrderImport)
 	r.With(auth.RequireAdmin).Post("/orders", h.createOrder)
-	r.With(auth.RequireAdmin).Put("/orders/{id}", h.updateOrder)
+	r.With(auth.RequireAdmin, h.onlyLegacyApprovalReplay("orders")).Put("/orders/{id}", h.updateOrder)
 	r.With(auth.RequireAdmin).Put("/orders/{id}/draft", h.updateOrderDraft)
 	r.With(auth.RequireAdmin).Post("/orders/{id}/adam-hall/cart", h.previewAdamHallOrder)
 	r.With(auth.RequireAdmin).Post("/orders/{id}/adam-hall/order", h.placeAdamHallOrder)
@@ -1654,11 +1655,7 @@ func (h *Handler) decideRequisition(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var input struct {
-		Decision          string     `json:"decision"`
-		Note              string     `json:"note"`
-		ExpectedUpdatedAt *time.Time `json:"expectedUpdatedAt"`
-	}
+	var input requisitionDecisionInput
 	if !decode(w, r, &input) {
 		return
 	}
@@ -1995,13 +1992,7 @@ func (h *Handler) updateOrder(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var input struct {
-		Status              string     `json:"status"`
-		SupplierOrderNumber string     `json:"supplierOrderNumber"`
-		ExpectedDelivery    *time.Time `json:"expectedDelivery"`
-		Notes               string     `json:"notes"`
-		ExpectedUpdatedAt   *time.Time `json:"expectedUpdatedAt"`
-	}
+	var input orderStatusInput
 	if !decode(w, r, &input) {
 		return
 	}

@@ -265,9 +265,22 @@ func TestProcurementWorkflowOwnerRetainedLifecycleAndRevision(t *testing.T) {
 	}
 	// Native return -> explicit revision -> draft -> resubmission clears old decision.
 	must(db, "UPDATE proc_requisitions SET status='submitted' WHERE id=?", requisition.ID)
-	version := review(2, "requisitions", "archive", requisition.ID)["expected_updated_at"]
-	status, out, raw = call(1, "cores:procurement:approve", "workflow-return-revision", "POST", fmt.Sprintf("/requisitions/%d/decision", requisition.ID), map[string]any{"decision": "returned", "note": "Revise the requested amount", "expectedUpdatedAt": version})
-	if status != 200 || out["status"] != "returned" {
+	decision := map[string]any{"id": requisition.ID, "decision": "returned", "note": "Revise the requested amount", "preview": true}
+	status, p, raw = call(1, "cores:procurement:approve", "", "POST", "/mcp/approvals/requisitions", decision)
+	if status != 200 || p["ready_to_execute"] != true {
+		t.Fatal("return preview", status, raw)
+	}
+	delete(decision, "preview")
+	decision["confirm_change"] = true
+	decision["expected_updated_at"] = p["expected_updated_at"]
+	decision["expected_context"] = p["expected_context"]
+	decision["confirmation_text"] = p["required_confirmation_text"]
+	status, out, raw = call(1, "cores:procurement:approve", "workflow-return-revision", "POST", "/mcp/approvals/requisitions", decision)
+	if status != 200 {
+		t.Fatal("return failed", status, raw)
+	}
+	out = out["requisition"].(map[string]any)
+	if out["status"] != "returned" {
 		t.Fatal("return failed", status, raw)
 	}
 	update := map[string]any{"title": "Revised retained demand", "costCenter": "NEW", "justification": "Revision reviewed", "lines": []any{map[string]any{"productId": product.ID, "description": "Revised line", "quantity": 2, "unit": "m", "estimatedPriceCents": 100}}, "expectedUpdatedAt": out["updatedAt"]}

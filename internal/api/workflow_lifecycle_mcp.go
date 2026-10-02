@@ -178,6 +178,9 @@ func procurementWorkflowRecord(tx *gorm.DB, entity string, id int64) (map[string
 	if err != nil {
 		return nil, err
 	}
+	if len(raw) > 512<<10 {
+		return nil, &receiptFlowError{status: 413, code: "bounded_workflow_record", message: "Complete workflow record exceeds the bounded MCP preview size"}
+	}
 	out := map[string]any{}
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return nil, err
@@ -303,6 +306,7 @@ func prepareProcurementWorkflowLifecycle(tx *gorm.DB, entity, operation string, 
 			if err := json.Unmarshal(original, &order); err != nil {
 				return nil, err
 			}
+			order.Status = "draft" // Validate retained fields without changing the original lifecycle status.
 			message = validateOrder(&order)
 		} else {
 			var requisition models.Requisition

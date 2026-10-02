@@ -1,5 +1,35 @@
 # ProcurementCore
 
+## Kontextgebundene Freigaben — Procurement 1.0.70 / MCP 1.5.45
+
+`procurement.requisitions.prepare_decide/decide` und
+`procurement.orders.prepare_transition/transition` delegieren direkt an die
+abgeschlossene Owner-API `/api/v1/mcp/approvals/{requisitions|orders}`.
+Sie prüfen den aktuellen aktiven Administrator; Bedarfsentscheidungen verlangen
+auch beim Replay einen anderen Nutzer als den ursprünglichen Anforderer.
+`cores:procurement:approve` bleibt ausdrücklich erforderlich. Vollständige
+Originalfelder, Positionen, Katalog-/Elternzustand und Wareneingänge sowie die
+konkrete Entscheidung und Begründung gehören zur exakten Vorschau. Ausführung
+verlangt `expected_updated_at`, `expected_context`, die vollständige kontextgebundene
+Bestätigungsphrase, die passende `confirm_*`-Freigabe und Idempotenzschlüssel.
+Vorschau/Dry-Run verändern keine Daten; Änderung, Audit, Aktivität und dauerhaftes
+Ergebnis werden zusammen verbucht. Wiederholungen prüfen erneut aktuelle Rechte.
+
+Genehmigen, Ablehnen und Zurückgeben sowie Senden, Bestätigen und Stornieren sind
+getrennte fachliche Aktionen. `sent` dokumentiert den Status und versendet keine
+Lieferantennachricht. Storno erhält bestehende Wareneingänge, Bestand und separate
+Einlagerungspflichten. Amazon-PunchOut muss den nativen Bestellprozess verwenden.
+Bereits erfolgreiche alte Aufrufe wiederholen ihren ursprünglichen Geschäftsbeleg;
+ungebuchte alte Vorschauen müssen neu vorbereitet werden. Die alten öffentlichen
+MCP-Entscheidungs-/Statuspfade erlauben ausschließlich solche Erfolgs-Replays.
+
+Restore erhält auch bei empfangenen und stornierten Bestellungen den ursprünglichen
+Status; die Validierung prüft Geschäftsfelder unabhängig vom initialen Neuanlage-
+Status. Vollständige Workflow-Vorschauen sind auf 512 KiB pro Originaldatensatz
+begrenzt. `workflow_fields` enthält separate Entscheidungs-/Einreichungs-/Status-
+Schemas. Es gibt keine neue Migration und weiterhin 383 Werkzeuge.
+Andere Punkte der beiden Issues bleiben offen.
+
 ## Bedarfs- und Bestellarchive — Procurement 1.0.69 / MCP 1.5.44
 
 Für `procurement.requisitions` und `procurement.orders` gibt es jeweils
