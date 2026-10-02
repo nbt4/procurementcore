@@ -1,5 +1,26 @@
 # ProcurementCore
 
+## Erhaltene Katalogarchive — 1.0.66
+
+Lieferanten, Produkte und Angebote bieten über
+`POST /api/v1/mcp/master-data/{suppliers|products|offers}/{archive|restore}`
+getrennte Archiv-/Restore-Aktionen. Vorschauen zeigen alle ursprünglichen Felder,
+Abhängigkeiten und eine datensatzgebundene Bestätigung. Die Ausführung braucht
+den aktuellen aktiven Administrator, signierte Realnutzer-Delegation mit
+`cores:procurement:archive`, exakte Mikrosekunden-Version, Kontext und einen
+Idempotenzschlüssel. Offene Bestellungen beziehungsweise Bedarfe blockieren das
+Archivieren; Angebote benötigen zur Wiederherstellung aktive Eltern.
+
+Identität, Preise und sonstige Felder bleiben erhalten. Audit, native Aktivität
+und dauerhafte Antwort werden gemeinsam mit der Änderung gespeichert. Wiederholungen
+prüfen die aktuellen Rechte, auch nach Neustart. Native DELETE-Endpunkte liefern
+für bestehende Katalogeinträge 409 statt Historie endgültig zu entfernen.
+Migration `008` / Umbrella `037` schützt sämtliche Schreiber vor Hard-Delete,
+Identitätswechsel und gemischter Archivierung/Wiederherstellung mit Feldänderungen.
+Native Pflege muss diese Schritte getrennt ausführen; es gibt keine Bestandsbewegung
+oder Nachricht an Lieferanten. Vollständige PostgreSQL-/Race-Tests prüfen auch
+Audit-Rollback, Abhängigkeiten, widerrufene Rollen und konkurrierende Ausführungen.
+
 ## PostgreSQL-Startschutz für PunchOut — 1.0.65
 
 Die Modelle erhalten die durch Migrationen installierten UNIQUE-Constraints für

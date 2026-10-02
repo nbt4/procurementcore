@@ -44,6 +44,7 @@ func NewHandler(db *gorm.DB, productScraper *scraper.Fetcher, amazonClient *amaz
 
 func (h *Handler) Routes() http.Handler {
 	r := chi.NewRouter()
+	r.With(auth.RequireAdmin).Post("/mcp/master-data/{entity}/{operation}", h.masterLifecycle)
 	r.Get("/me", h.me)
 	r.Get("/dashboard", h.dashboard)
 	r.Get("/categories", h.listCategories)
@@ -631,18 +632,16 @@ func (h *Handler) deleteSupplier(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var references int64
-	h.db.Model(&models.Offer{}).Where("supplier_id = ?", id).Count(&references)
-	if references > 0 {
-		badRequest(w, "Lieferant besitzt Angebote und kann nur deaktiviert werden")
+	var row models.Supplier
+	if err := h.db.First(&row, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			notFound(w)
+		} else {
+			serverError(w, err)
+		}
 		return
 	}
-	if h.db.Delete(&models.Supplier{}, id).RowsAffected == 0 {
-		notFound(w)
-		return
-	}
-	h.activity(r, "supplier", id, "deleted", "")
-	w.WriteHeader(http.StatusNoContent)
+	writeJSON(w, http.StatusConflict, map[string]string{"error": "catalog_archive_required", "message": "Archive catalog records separately to preserve identity and history; permanent deletion is unavailable"})
 }
 
 type ProductFilter struct {
@@ -992,22 +991,16 @@ func (h *Handler) deleteProduct(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var references int64
-	h.db.Model(&models.RequisitionLine{}).Where("product_id = ?", id).Count(&references)
-	if references > 0 {
-		badRequest(w, "Artikel wird in Bedarfsmeldungen verwendet und kann nur deaktiviert werden")
+	var row models.Product
+	if err := h.db.First(&row, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			notFound(w)
+		} else {
+			serverError(w, err)
+		}
 		return
 	}
-	if err := h.db.Transaction(func(tx *gorm.DB) error {
-		tx.Where("product_id = ?", id).Delete(&models.PriceAlert{})
-		tx.Where("product_id = ?", id).Delete(&models.Offer{})
-		return tx.Delete(&models.Product{}, id).Error
-	}); err != nil {
-		serverError(w, err)
-		return
-	}
-	h.activity(r, "product", id, "deleted", "")
-	w.WriteHeader(http.StatusNoContent)
+	writeJSON(w, http.StatusConflict, map[string]string{"error": "catalog_archive_required", "message": "Archive catalog records separately to preserve identity and history; permanent deletion is unavailable"})
 }
 
 func (h *Handler) listOffers(w http.ResponseWriter, r *http.Request) {
@@ -1224,15 +1217,16 @@ func (h *Handler) deleteOffer(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.db.Transaction(func(tx *gorm.DB) error {
-		tx.Where("offer_id = ?", id).Delete(&models.PriceHistory{})
-		return tx.Delete(&models.Offer{}, id).Error
-	}); err != nil {
-		serverError(w, err)
+	var row models.Offer
+	if err := h.db.First(&row, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			notFound(w)
+		} else {
+			serverError(w, err)
+		}
 		return
 	}
-	h.activity(r, "offer", id, "deleted", "")
-	w.WriteHeader(http.StatusNoContent)
+	writeJSON(w, http.StatusConflict, map[string]string{"error": "catalog_archive_required", "message": "Archive catalog records separately to preserve identity and history; permanent deletion is unavailable"})
 }
 
 func (h *Handler) offerHistory(w http.ResponseWriter, r *http.Request) {

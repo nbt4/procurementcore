@@ -48,5 +48,8 @@ func Open(dsn string) (*gorm.DB, error) {
 	)`).Error; err != nil {
 		return nil, fmt.Errorf("migrate core product links: %w", err)
 	}
+	if err := ensureMasterLifecycle(db); err != nil {
+		return nil, fmt.Errorf("migrate procurement master lifecycle: %w", err)
+	}
 	return db, nil
 }
