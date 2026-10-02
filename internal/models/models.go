@@ -25,6 +25,7 @@ type Supplier struct {
 }
 
 type Category struct {
+	Active          bool            `gorm:"default:true;index" json:"active,omitempty"`
 	ID              uint            `gorm:"primaryKey" json:"id"`
 	Name            string          `gorm:"size:160;unique;not null" json:"name"`
 	Description     string          `gorm:"type:text" json:"description"`

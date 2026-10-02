@@ -1,5 +1,20 @@
 # ProcurementCore
 
+## Erhaltene Beschaffungskategorien — 1.0.67
+
+Kategorien unterstützen dieselben getrennten, exakt bestätigten Archiv-/Restore-
+Aktionen wie Lieferanten, Produkte und Angebote. Parameterdefinitionen, Beschreibung
+und Identität bleiben vollständig erhalten. Aktive Produkte blockieren Kategorie-
+archive; aktive Produktanlage und Wiederherstellung verlangen eine aktive Kategorie.
+Migration `009` / Root `038` ergänzt den standardmäßig aktiven Zustand für bestehende
+Kategorien sowie Schutz für sämtliche Schreiber. Normale Kategoriepflege erhält
+den bisherigen Status; dauerhafte Löschung liefert 409. Die native Kategorienliste
+und Auswahl neuer Produkte enthalten aktive Kategorien. MCP-Suche behält Archive
+als wiederherzustellende Identitäten und verhindert neue Dubletten.
+
+Rechte, exakte Vorschau/Kontext/Version/Bestätigungsphrase sowie atomare Audit-,
+Aktivitäts- und Replay-Regeln entsprechen dem Katalog-Lifecycle aus 1.0.66.
+
 ## Erhaltene Katalogarchive — 1.0.66
 
 Lieferanten, Produkte und Angebote bieten über

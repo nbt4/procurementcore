@@ -1,10 +1,5 @@
-package database
-
-import "gorm.io/gorm"
-
-// MasterLifecycleSQL keeps both native and MCP writers from discarding a
-// catalog record or combining archival/restoration with business edits.
-const MasterLifecycleSQL = `CREATE OR REPLACE FUNCTION guard_procurement_master_lifecycle() RETURNS TRIGGER AS $$
+ALTER TABLE proc_categories ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT true;
+CREATE OR REPLACE FUNCTION guard_procurement_master_lifecycle() RETURNS TRIGGER AS $$
 DECLARE old_business JSONB;new_business JSONB;
 BEGIN
  IF TG_OP='DELETE' THEN RAISE EXCEPTION 'Archive procurement catalog records to retain identities and history' USING ERRCODE='23514';END IF;
@@ -44,8 +39,3 @@ DROP TRIGGER IF EXISTS proc_products_guard_lifecycle_version ON proc_products;
 CREATE TRIGGER proc_products_guard_lifecycle_version BEFORE INSERT OR UPDATE OR DELETE ON proc_products FOR EACH ROW EXECUTE FUNCTION guard_procurement_master_lifecycle();
 DROP TRIGGER IF EXISTS proc_offers_guard_lifecycle_version ON proc_offers;
 CREATE TRIGGER proc_offers_guard_lifecycle_version BEFORE INSERT OR UPDATE OR DELETE ON proc_offers FOR EACH ROW EXECUTE FUNCTION guard_procurement_master_lifecycle();
-`
-
-func ensureMasterLifecycle(db *gorm.DB) error {
-	return db.Transaction(func(tx *gorm.DB) error { return tx.Exec(MasterLifecycleSQL).Error })
-}

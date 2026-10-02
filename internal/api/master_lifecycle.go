@@ -31,9 +31,10 @@ type masterLifecycleRequest struct {
 }
 
 var masterLifecycleRecords = map[string]struct{ table, kind, record string }{
-	"suppliers": {"proc_suppliers", "supplier", `jsonb_build_object('id',id,'name',name,'code',code,'website',website,'contactName',contact_name,'email',email,'phone',phone,'paymentTerms',payment_terms,'defaultLeadDays',default_lead_days,'rating',rating,'preferred',preferred,'active',active,'riskLevel',risk_level,'notes',notes,'createdAt',created_at,'updatedAt',to_char(updated_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'))`},
-	"products":  {"proc_products", "product", `jsonb_build_object('id',id,'sku',sku,'name',name,'description',description,'categoryId',category_id,'unit',unit,'manufacturer',manufacturer,'model',model,'parameters',parameters,'attributes',attributes,'active',active,'reorderPoint',reorder_point,'targetStock',target_stock,'createdAt',created_at,'updatedAt',to_char(updated_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'))`},
-	"offers":    {"proc_offers", "offer", `jsonb_build_object('id',id,'productId',product_id,'supplierId',supplier_id,'supplierSku',supplier_sku,'priceCents',price_cents,'currency',currency,'minimumQuantity',minimum_quantity,'packSize',pack_size,'leadDays',lead_days,'purchaseUrl',purchase_url,'validUntil',valid_until,'active',active,'lastCheckedAt',last_checked_at,'createdAt',created_at,'updatedAt',to_char(updated_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'))`},
+	"categories": {"proc_categories", "category", `jsonb_build_object('id',id,'name',name,'description',description,'parameterSchema',parameter_schema,'active',active,'createdAt',created_at,'updatedAt',to_char(updated_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'))`},
+	"suppliers":  {"proc_suppliers", "supplier", `jsonb_build_object('id',id,'name',name,'code',code,'website',website,'contactName',contact_name,'email',email,'phone',phone,'paymentTerms',payment_terms,'defaultLeadDays',default_lead_days,'rating',rating,'preferred',preferred,'active',active,'riskLevel',risk_level,'notes',notes,'createdAt',created_at,'updatedAt',to_char(updated_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'))`},
+	"products":   {"proc_products", "product", `jsonb_build_object('id',id,'sku',sku,'name',name,'description',description,'categoryId',category_id,'unit',unit,'manufacturer',manufacturer,'model',model,'parameters',parameters,'attributes',attributes,'active',active,'reorderPoint',reorder_point,'targetStock',target_stock,'createdAt',created_at,'updatedAt',to_char(updated_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'))`},
+	"offers":     {"proc_offers", "offer", `jsonb_build_object('id',id,'productId',product_id,'supplierId',supplier_id,'supplierSku',supplier_sku,'priceCents',price_cents,'currency',currency,'minimumQuantity',minimum_quantity,'packSize',pack_size,'leadDays',lead_days,'purchaseUrl',purchase_url,'validUntil',valid_until,'active',active,'lastCheckedAt',last_checked_at,'createdAt',created_at,'updatedAt',to_char(updated_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'))`},
 }
 
 func lifecycleJSON(tx *gorm.DB, query string, args ...any) (map[string]any, error) {
@@ -75,7 +76,7 @@ func (h *Handler) masterLifecycle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input masterLifecycleRequest
-	decoder := json.NewDecoder(io.LimitReader(r.Body, 8193))
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&input); err != nil || decoder.Decode(new(any)) != io.EOF || decoder.InputOffset() > 8192 || input.ID < 1 || input.ID > math.MaxInt32 {
 		badRequest(w, "One bounded lifecycle object and exact positive ID required")
@@ -129,6 +130,12 @@ func (h *Handler) masterLifecycle(w http.ResponseWriter, r *http.Request) {
 			}
 			var message string
 			switch entity {
+			case "categories":
+				var original models.Category
+				if err := json.Unmarshal(raw, &original); err != nil {
+					return err
+				}
+				message = validateCategory(&original)
 			case "suppliers":
 				var original models.Supplier
 				if err := json.Unmarshal(raw, &original); err != nil {
@@ -159,6 +166,8 @@ func (h *Handler) masterLifecycle(w http.ResponseWriter, r *http.Request) {
 		dependencies := map[string]any{}
 		queries := []struct{ key, query string }{}
 		switch entity {
+		case "categories":
+			queries = append(queries, struct{ key, query string }{"products", `SELECT id AS product_id,sku,name,active,updated_at FROM proc_products WHERE category_id=?`})
 		case "suppliers":
 			queries = append(queries,
 				struct{ key, query string }{"open_orders", `SELECT id AS order_id,number,status,updated_at FROM proc_purchase_orders WHERE supplier_id=? AND status NOT IN ('cancelled','received')`},
@@ -188,6 +197,14 @@ func (h *Handler) masterLifecycle(w http.ResponseWriter, r *http.Request) {
 			dependencies[item.key] = rows
 			if len(rows) > 1000 {
 				required = append(required, "bounded_lifecycle_context")
+			}
+			if !restore && entity == "categories" && item.key == "products" {
+				for _, row := range rows {
+					if row["active"] == true {
+						required = append(required, "active_products")
+						break
+					}
+				}
 			}
 			if !restore && strings.HasPrefix(item.key, "open_") && len(rows) > 0 {
 				required = append(required, "active_"+item.key)

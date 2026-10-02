@@ -233,7 +233,7 @@ func (h *Handler) dashboard(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) listCategories(w http.ResponseWriter, r *http.Request) {
 	var rows []models.Category
-	if err := h.db.Order("name").Find(&rows).Error; err != nil {
+	if err := h.db.Where("active = true").Order("name").Find(&rows).Error; err != nil {
 		serverError(w, err)
 		return
 	}
@@ -326,6 +326,7 @@ func (h *Handler) updateCategory(w http.ResponseWriter, r *http.Request) {
 		}
 		updated = input.Category
 		updated.ID, updated.CreatedAt, updated.UpdatedAt = previous.ID, previous.CreatedAt, time.Time{}
+		updated.Active = previous.Active
 		if err := tx.Save(&updated).Error; err != nil {
 			return err
 		}
@@ -423,18 +424,16 @@ func (h *Handler) deleteCategory(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var count int64
-	h.db.Model(&models.Product{}).Where("category_id = ?", id).Count(&count)
-	if count > 0 {
-		badRequest(w, "Kategorie wird noch von Artikeln verwendet")
+	var row models.Category
+	if err := h.db.First(&row, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			notFound(w)
+		} else {
+			serverError(w, err)
+		}
 		return
 	}
-	if h.db.Delete(&models.Category{}, id).RowsAffected == 0 {
-		notFound(w)
-		return
-	}
-	h.activity(r, "category", id, "deleted", "")
-	w.WriteHeader(http.StatusNoContent)
+	writeJSON(w, http.StatusConflict, map[string]string{"error": "catalog_archive_required", "message": "Archive categories separately to preserve identity, parameters and history"})
 }
 
 func (h *Handler) listSuppliers(w http.ResponseWriter, r *http.Request) {
@@ -814,7 +813,7 @@ func (h *Handler) createProduct(w http.ResponseWriter, r *http.Request) {
 		}
 		if row.CategoryID != nil {
 			var count int64
-			if err := tx.Model(&models.Category{}).Where("id = ?", *row.CategoryID).Count(&count).Error; err != nil {
+			if err := tx.Model(&models.Category{}).Where("id = ? AND active=true", *row.CategoryID).Count(&count).Error; err != nil {
 				return err
 			}
 			if count == 0 {
@@ -921,7 +920,7 @@ func (h *Handler) updateProduct(w http.ResponseWriter, r *http.Request) {
 		}
 		if input.CategoryID != nil {
 			var categoryCount int64
-			if err := tx.Model(&models.Category{}).Where("id = ?", *input.CategoryID).Count(&categoryCount).Error; err != nil {
+			if err := tx.Model(&models.Category{}).Where("id = ? AND active=true", *input.CategoryID).Count(&categoryCount).Error; err != nil {
 				return err
 			}
 			if categoryCount == 0 {
