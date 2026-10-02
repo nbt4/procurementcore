@@ -45,6 +45,7 @@ func NewHandler(db *gorm.DB, productScraper *scraper.Fetcher, amazonClient *amaz
 func (h *Handler) Routes() http.Handler {
 	r := chi.NewRouter()
 	r.With(auth.RequireAdmin).Post("/mcp/master-data/{entity}/{operation}", h.masterLifecycle)
+	r.With(auth.RequireAdmin).Post("/mcp/orders/receive", h.goodsReceiptMCP)
 	r.Get("/me", h.me)
 	r.Get("/dashboard", h.dashboard)
 	r.Get("/categories", h.listCategories)
@@ -2346,20 +2347,23 @@ func normalizeReceiptSerials(values []string, quantity int, required bool) ([]st
 	return result, nil
 }
 
+type goodsReceiptInput struct {
+	LineID            uint       `json:"lineId"`
+	Quantity          float64    `json:"quantity"`
+	Note              string     `json:"note"`
+	ExpectedUpdatedAt *time.Time `json:"expectedUpdatedAt"`
+	SerialNumbers     []string   `json:"serialNumbers"`
+	TargetZoneID      *int64     `json:"targetZoneId"`
+	AllowOverdelivery bool       `json:"allowOverdelivery"`
+}
+
 func (h *Handler) receiveOrder(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
 		return
 	}
-	var input struct {
-		LineID            uint       `json:"lineId"`
-		Quantity          float64    `json:"quantity"`
-		Note              string     `json:"note"`
-		ExpectedUpdatedAt *time.Time `json:"expectedUpdatedAt"`
-		SerialNumbers     []string   `json:"serialNumbers"`
-		TargetZoneID      *int64     `json:"targetZoneId"`
-		AllowOverdelivery bool       `json:"allowOverdelivery"`
-	}
+	var input goodsReceiptInput
+
 	if !decode(w, r, &input) {
 		return
 	}
@@ -2367,9 +2371,39 @@ func (h *Handler) receiveOrder(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, "Position und positive Menge sind erforderlich")
 		return
 	}
+	if isMCPMutation(r) {
+		if !signedProcurementDelegation(r, "cores:procurement:receive") {
+			writeJSON(w, 403, map[string]string{"error": "Signed current goods-receipt administrator and explicit receive scope required"})
+			return
+		}
+		request := goodsReceiptMCPRequest{OrderID: int64(id), LineID: int64(input.LineID), Quantity: input.Quantity, Note: input.Note, SerialNumbers: input.SerialNumbers, TargetZoneID: input.TargetZoneID, AllowOverdelivery: input.AllowOverdelivery}
+		if input.ExpectedUpdatedAt != nil {
+			request.ExpectedUpdatedAt = input.ExpectedUpdatedAt.Format(time.RFC3339Nano)
+		}
+		var replay json.RawMessage
+		err := h.db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+			var administrator bool
+			if err := tx.Raw("SELECT is_active AND is_admin FROM users WHERE userid=? FOR SHARE", auth.CurrentUser(r).ID).Row().Scan(&administrator); err != nil || !administrator {
+				return &receiptFlowError{status: 403, code: "current_administrator_required", message: "Current active goods-receipt administrator required"}
+			}
+			var err error
+			replay, err = legacyGoodsReceiptReplay(tx, r, request)
+			if err != nil {
+				return err
+			}
+			if replay == nil {
+				return &receiptFlowError{status: 428, code: "context_required", message: "Prepare and confirm through /mcp/orders/receive with exact context; legacy endpoint only replays saved receipts"}
+			}
+			return nil
+		})
+		if err != nil {
+			writeProcurementFlowError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, replay)
+		return
+	}
 	user := auth.CurrentUser(r)
-	var line models.PurchaseOrderLine
-	var order models.PurchaseOrder
 	receipt := models.Receipt{PurchaseOrderID: id, PurchaseOrderLineID: input.LineID, Quantity: input.Quantity, ReceivedBy: user.ID, ReceivedByName: user.Username, Note: input.Note, ReceivedAt: time.Now()}
 	err := h.db.Transaction(func(tx *gorm.DB) error {
 		idempotency, replay, err := beginIdempotentMutation(tx, r, "purchase_order_receipt", map[string]any{"id": id, "input": input})
@@ -2379,137 +2413,7 @@ func (h *Handler) receiveOrder(w http.ResponseWriter, r *http.Request) {
 		if replay != nil {
 			return json.Unmarshal(replay, &receipt)
 		}
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&order, id).Error; err != nil {
-			return err
-		}
-		if order.Status != "sent" && order.Status != "confirmed" && order.Status != "partially_confirmed" && order.Status != "partially_received" {
-			return &receiptFlowError{status: http.StatusConflict, code: "order_not_receivable", message: "Wareneingang ist nur für versendete oder bestätigte Bestellungen zulässig"}
-		}
-		if versionErr := validateExpectedUpdate(order.UpdatedAt, input.ExpectedUpdatedAt, isMCPMutation(r)); versionErr != nil {
-			return versionErr
-		}
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND purchase_order_id = ?", input.LineID, id).First(&line).Error; err != nil {
-			return err
-		}
-		beforeOrder, beforeLine := order, line
-		if line.ReceivedQuantity+input.Quantity > line.Quantity && !input.AllowOverdelivery {
-			return &receiptFlowError{status: http.StatusBadRequest, code: "ordered_quantity_exceeded", message: "Wareneingang überschreitet Bestellmenge"}
-		}
-		if order.AmazonPunchoutSessionID != nil {
-			var confirmed struct {
-				Count    int64
-				Accepted float64
-			}
-			if err := tx.Model(&models.AmazonLineConfirmation{}).Select("COUNT(*) AS count, COALESCE(SUM(accepted_quantity), 0) AS accepted").Where("purchase_order_line_id = ?", line.ID).Scan(&confirmed).Error; err != nil {
-				return err
-			}
-			if confirmed.Count > 0 && line.ReceivedQuantity+input.Quantity > confirmed.Accepted+0.000001 {
-				return &receiptFlowError{status: http.StatusConflict, code: "amazon_confirmed_quantity_exceeded", message: "Wareneingang überschreitet die von Amazon bestätigte Menge"}
-			}
-		}
-		if line.ProductID != nil {
-			var warehouseProductID int64
-			var trackingMode string
-			scanErr := tx.Raw(`
-				SELECT p.productID,p.tracking_mode
-				FROM core_product_links cpl
-				JOIN products p ON p.productID=cpl.warehouse_product_id
-				WHERE cpl.procurement_product_id=? AND p.lifecycle_status='active'
-				FOR UPDATE OF p
-			`, *line.ProductID).Row().Scan(&warehouseProductID, &trackingMode)
-			if errors.Is(scanErr, sql.ErrNoRows) {
-				return &receiptFlowError{status: http.StatusConflict, code: "warehouse_product_required", message: "Produkt zuerst mit WarehouseCore verknüpfen oder dort neu anlegen"}
-			}
-			if scanErr != nil {
-				return scanErr
-			}
-			if validationErr := validateWarehouseReceipt(trackingMode, input.Quantity); validationErr != nil {
-				return validationErr
-			}
-			var targetZone any
-			if input.TargetZoneID != nil {
-				var zone struct {
-					ID                int64
-					Code              string
-					IsActive          bool
-					IsStorable        bool
-					OperationalStatus string
-				}
-				if err := tx.Raw(`SELECT zone_id AS id,code,is_active,is_storable,operational_status FROM storage_zones WHERE zone_id=? FOR UPDATE`, *input.TargetZoneID).Scan(&zone).Error; err != nil {
-					return err
-				}
-				if zone.ID == 0 || !zone.IsActive || !zone.IsStorable || zone.OperationalStatus != "available" {
-					return &receiptFlowError{status: http.StatusConflict, code: "target_zone_unavailable", message: "Der Ziel-Lagerplatz ist nicht aktiv, verfügbar und einlagerungsfähig"}
-				}
-				targetZone = zone.ID
-			}
-			receipt.WarehouseProductID = &warehouseProductID
-			receipt.WarehouseTrackingMode = trackingMode
-			switch trackingMode {
-			case "quantity":
-				if err := tx.Exec(`
-					INSERT INTO product_locations(product_id,zone_id,quantity,updated_at)
-					VALUES(?,?,?,CURRENT_TIMESTAMP)
-					ON CONFLICT(product_id,zone_id) DO UPDATE
-					SET quantity=product_locations.quantity+EXCLUDED.quantity,updated_at=CURRENT_TIMESTAMP
-				`, warehouseProductID, targetZone, input.Quantity).Error; err != nil {
-					return err
-				}
-				receipt.WarehouseQuantityApplied = input.Quantity
-				if err := tx.Raw("SELECT COALESCE(stock_quantity,0) FROM products WHERE productID=?", warehouseProductID).Scan(&receipt.WarehouseStockAfter).Error; err != nil {
-					return err
-				}
-			case "individual":
-				serials, validationErr := normalizeReceiptSerials(input.SerialNumbers, int(input.Quantity), isMCPMutation(r))
-				if validationErr != nil {
-					return validationErr
-				}
-				for index := 0; index < int(input.Quantity); index++ {
-					var deviceID string
-					var serial any
-					if index < len(serials) {
-						serial = serials[index]
-						if err := lockAndValidateReceiptSerial(tx, serials[index]); err != nil {
-							return err
-						}
-					}
-					if err := tx.Raw(`INSERT INTO devices(productID,serialnumber,status,condition_status,current_location) VALUES(?,?,'location_unknown','available','location_unknown') RETURNING deviceID`, warehouseProductID, serial).Scan(&deviceID).Error; err != nil {
-						return err
-					}
-					receipt.CreatedDeviceIDs = append(receipt.CreatedDeviceIDs, deviceID)
-				}
-				receipt.WarehouseQuantityApplied = input.Quantity
-				if err := tx.Raw("SELECT COUNT(*) FROM devices WHERE productID=?", warehouseProductID).Scan(&receipt.WarehouseDeviceCountAfter).Error; err != nil {
-					return err
-				}
-			}
-			var putawayTaskID int64
-			if err := tx.Raw(`INSERT INTO warehouse_tasks(task_type,status,priority,to_zone_id,product_id,quantity,notes) VALUES('putaway','open',70,?,?,?,?) RETURNING task_id`, input.TargetZoneID, warehouseProductID, input.Quantity, fmt.Sprintf("Wareneingang Bestellung %d Position %d", id, line.ID)).Scan(&putawayTaskID).Error; err != nil {
-				return err
-			}
-			receipt.PutawayTaskID = &putawayTaskID
-		}
-		receipt.PurchaseOrderLineID = line.ID
-		line.ReceivedQuantity += input.Quantity
-		if err := tx.Save(&line).Error; err != nil {
-			return err
-		}
-		if err := tx.Create(&receipt).Error; err != nil {
-			return err
-		}
-		var remaining int64
-		tx.Model(&models.PurchaseOrderLine{}).Where("purchase_order_id = ? AND received_quantity < quantity", id).Count(&remaining)
-		status := "received"
-		if remaining > 0 {
-			status = "partially_received"
-		}
-		if err := tx.Model(&order).Update("status", status).Error; err != nil {
-			return err
-		}
-		if err := tx.First(&order, id).Error; err != nil {
-			return err
-		}
-		if err := auditGoodsReceipt(tx, r, beforeOrder, order, beforeLine, line, receipt); err != nil {
+		if err := h.applyGoodsReceipt(tx, r, id, input, &receipt); err != nil {
 			return err
 		}
 		return completeIdempotentMutation(tx, idempotency, http.StatusCreated, receipt)
@@ -2519,6 +2423,148 @@ func (h *Handler) receiveOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, receipt)
+}
+
+func (h *Handler) applyGoodsReceipt(tx *gorm.DB, r *http.Request, id uint, input goodsReceiptInput, receipt *models.Receipt) error {
+	var line models.PurchaseOrderLine
+	var order models.PurchaseOrder
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&order, id).Error; err != nil {
+		return err
+	}
+	if order.Status != "sent" && order.Status != "confirmed" && order.Status != "partially_confirmed" && order.Status != "partially_received" {
+		return &receiptFlowError{status: http.StatusConflict, code: "order_not_receivable", message: "Wareneingang ist nur für versendete oder bestätigte Bestellungen zulässig"}
+	}
+	if versionErr := validateExpectedUpdate(order.UpdatedAt, input.ExpectedUpdatedAt, isMCPMutation(r)); versionErr != nil {
+		return versionErr
+	}
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND purchase_order_id = ?", input.LineID, id).First(&line).Error; err != nil {
+		return err
+	}
+	beforeOrder, beforeLine := order, line
+	if line.ReceivedQuantity+input.Quantity > line.Quantity && !input.AllowOverdelivery {
+		return &receiptFlowError{status: http.StatusBadRequest, code: "ordered_quantity_exceeded", message: "Wareneingang überschreitet Bestellmenge"}
+	}
+	if order.AmazonPunchoutSessionID != nil {
+		var confirmed struct {
+			Count    int64
+			Accepted float64
+		}
+		if err := tx.Model(&models.AmazonLineConfirmation{}).Select("COUNT(*) AS count, COALESCE(SUM(accepted_quantity), 0) AS accepted").Where("purchase_order_line_id = ?", line.ID).Scan(&confirmed).Error; err != nil {
+			return err
+		}
+		if confirmed.Count > 0 && line.ReceivedQuantity+input.Quantity > confirmed.Accepted+0.000001 {
+			return &receiptFlowError{status: http.StatusConflict, code: "amazon_confirmed_quantity_exceeded", message: "Wareneingang überschreitet die von Amazon bestätigte Menge"}
+		}
+	}
+	if line.ProductID != nil {
+		var warehouseProductID int64
+		var trackingMode string
+		scanErr := tx.Raw(`
+				SELECT p.productID,p.tracking_mode
+				FROM core_product_links cpl
+				JOIN products p ON p.productID=cpl.warehouse_product_id
+				WHERE cpl.procurement_product_id=? AND p.lifecycle_status='active'
+				FOR UPDATE OF p
+			`, *line.ProductID).Row().Scan(&warehouseProductID, &trackingMode)
+		if errors.Is(scanErr, sql.ErrNoRows) {
+			return &receiptFlowError{status: http.StatusConflict, code: "warehouse_product_required", message: "Produkt zuerst mit WarehouseCore verknüpfen oder dort neu anlegen"}
+		}
+		if scanErr != nil {
+			return scanErr
+		}
+		if validationErr := validateWarehouseReceipt(trackingMode, input.Quantity); validationErr != nil {
+			return validationErr
+		}
+		var targetZone any
+		if input.TargetZoneID != nil {
+			var zone struct {
+				ID                int64
+				Code              string
+				IsActive          bool
+				IsStorable        bool
+				OperationalStatus string
+			}
+			if err := tx.Raw(`SELECT zone_id AS id,code,is_active,is_storable,operational_status FROM storage_zones WHERE zone_id=? FOR UPDATE`, *input.TargetZoneID).Scan(&zone).Error; err != nil {
+				return err
+			}
+			if zone.ID == 0 || !zone.IsActive || !zone.IsStorable || zone.OperationalStatus != "available" {
+				return &receiptFlowError{status: http.StatusConflict, code: "target_zone_unavailable", message: "Der Ziel-Lagerplatz ist nicht aktiv, verfügbar und einlagerungsfähig"}
+			}
+			targetZone = zone.ID
+		}
+		receipt.WarehouseProductID = &warehouseProductID
+		receipt.WarehouseTrackingMode = trackingMode
+		switch trackingMode {
+		case "quantity":
+			if err := tx.Exec(`
+					INSERT INTO product_locations(product_id,zone_id,quantity,updated_at)
+					VALUES(?,?,?,CURRENT_TIMESTAMP)
+					ON CONFLICT(product_id,zone_id) DO UPDATE
+					SET quantity=product_locations.quantity+EXCLUDED.quantity,updated_at=CURRENT_TIMESTAMP
+				`, warehouseProductID, targetZone, input.Quantity).Error; err != nil {
+				return err
+			}
+			receipt.WarehouseQuantityApplied = input.Quantity
+			if err := tx.Raw("SELECT COALESCE(stock_quantity,0) FROM products WHERE productID=?", warehouseProductID).Scan(&receipt.WarehouseStockAfter).Error; err != nil {
+				return err
+			}
+		case "individual":
+			serials, validationErr := normalizeReceiptSerials(input.SerialNumbers, int(input.Quantity), isMCPMutation(r))
+			if validationErr != nil {
+				return validationErr
+			}
+			for index := 0; index < int(input.Quantity); index++ {
+				var deviceID string
+				var serial any
+				if index < len(serials) {
+					serial = serials[index]
+					if err := lockAndValidateReceiptSerial(tx, serials[index]); err != nil {
+						return err
+					}
+				}
+				if err := tx.Raw(`INSERT INTO devices(productID,serialnumber,status,condition_status,current_location) VALUES(?,?,'location_unknown','available','location_unknown') RETURNING deviceID`, warehouseProductID, serial).Scan(&deviceID).Error; err != nil {
+					return err
+				}
+				receipt.CreatedDeviceIDs = append(receipt.CreatedDeviceIDs, deviceID)
+			}
+			receipt.WarehouseQuantityApplied = input.Quantity
+			if err := tx.Raw("SELECT COUNT(*) FROM devices WHERE productID=?", warehouseProductID).Scan(&receipt.WarehouseDeviceCountAfter).Error; err != nil {
+				return err
+			}
+		}
+		var putawayTaskID int64
+		if err := tx.Raw(`INSERT INTO warehouse_tasks(task_type,status,priority,to_zone_id,product_id,quantity,notes) VALUES('putaway','open',70,?,?,?,?) RETURNING task_id`, input.TargetZoneID, warehouseProductID, input.Quantity, fmt.Sprintf("Wareneingang Bestellung %d Position %d", id, line.ID)).Scan(&putawayTaskID).Error; err != nil {
+			return err
+		}
+		receipt.PutawayTaskID = &putawayTaskID
+	}
+	receipt.PurchaseOrderLineID = line.ID
+	line.ReceivedQuantity += input.Quantity
+	if err := tx.Save(&line).Error; err != nil {
+		return err
+	}
+	if err := tx.Create(receipt).Error; err != nil {
+		return err
+	}
+	var remaining int64
+	if err := tx.Model(&models.PurchaseOrderLine{}).Where("purchase_order_id = ? AND received_quantity < quantity", id).Count(&remaining).Error; err != nil {
+		return err
+	}
+	status := "received"
+	if remaining > 0 {
+		status = "partially_received"
+	}
+	if err := tx.Model(&order).Update("status", status).Error; err != nil {
+		return err
+	}
+	if err := tx.First(&order, id).Error; err != nil {
+		return err
+	}
+	if err := auditGoodsReceipt(tx, r, beforeOrder, order, beforeLine, line, *receipt); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func auditGoodsReceipt(tx *gorm.DB, r *http.Request, beforeOrder, afterOrder models.PurchaseOrder, beforeLine, afterLine models.PurchaseOrderLine, receipt models.Receipt) error {
@@ -2531,7 +2577,7 @@ func auditGoodsReceipt(tx *gorm.DB, r *http.Request, beforeOrder, afterOrder mod
 	if err != nil {
 		return err
 	}
-	afterJSON, err := json.Marshal(map[string]any{"origin": origin, "order": afterOrder, "line": afterLine, "receipt": receipt})
+	afterJSON, err := json.Marshal(map[string]any{"origin": origin, "updated_at": afterOrder.UpdatedAt, "order": afterOrder, "line": afterLine, "receipt": receipt})
 	if err != nil {
 		return err
 	}
