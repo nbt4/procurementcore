@@ -1,5 +1,33 @@
 # ProcurementCore
 
+## Bedarfs- und Bestellarchive — Procurement 1.0.69 / MCP 1.5.44
+
+Für `procurement.requisitions` und `procurement.orders` gibt es jeweils
+`prepare_archive/archive`, `prepare_restore/restore` und `audit_history`.
+Die geschlossene API `/api/v1/mcp/workflows/{requisitions|orders}/{archive|restore}`
+erhält ursprünglichen Status, sämtliche Geschäftsfelder, Positions-IDs und
+Wareneingangshistorie. Die Vorschau zeigt das vollständige Original und aktuelle
+Abhängigkeiten. Ausführung verlangt Archiv-Scope, exakte Mikrosekunden-Version,
+`expected_context`, datensatz-/kontextgebundene Bestätigungsphrase,
+`confirm_change` und Idempotenzschlüssel. Aktuelle Rechte werden auch bei
+Wiederholung geprüft: Bestellungen verlangen Administratorrechte, Bedarfe den
+ursprünglichen Anforderer oder Administrator. Audit, Aktivität und Erfolgsbeleg
+werden zusammen mit der Änderung verbucht.
+
+Offene Bestellungen blockieren Bedarfsarchive. Bestellungen können nur als
+Entwurf, vollständig empfangen oder storniert archiviert werden; offene zugehörige
+Einlagerungsaufgaben blockieren ebenfalls. Restore prüft ursprüngliche aktive
+Produkte, Lieferanten und gegebenenfalls den ursprünglichen Bedarf. Operative
+Listen schließen Archive aus. Migration `010` / Root `039` schützt alle Schreiber,
+erhält Identitäten und lässt auch Positionsänderungen die Elternversion erhöhen.
+Bereits bestehende Einlagerungszuordnungen werden aus Wareneingangs-Audits übernommen.
+
+Zurückgegebene Bedarfe können ausdrücklich überarbeitet werden und werden dabei
+wieder zum Entwurf. Erneutes Einreichen entfernt die vorherige Entscheidungsfreigabe;
+deren Historie bleibt im Audit erhalten. Der Katalog umfasst 383 Werkzeuge
+(105 Abfragen / 139 Vorschauen / 139 Ausführungen). Die übrigen Abnahmepunkte
+der Issues #4/#5 bleiben offen.
+
 ## Vollständiger Wareneingang — Procurement 1.0.68 / MCP 1.5.43
 
 `procurement.orders.prepare_receive/receive` delegieren an

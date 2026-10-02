@@ -118,6 +118,8 @@ type PriceAlert struct {
 }
 
 type Requisition struct {
+	IsArchived              bool              `gorm:"not null;default:false" json:"isArchived,omitempty"`
+	ArchivedAt              *time.Time        `json:"archivedAt,omitempty"`
 	ID                      uint              `gorm:"primaryKey" json:"id"`
 	AmazonPunchoutSessionID *uint             `gorm:"unique" json:"amazonPunchoutSessionId,omitempty"`
 	Number                  string            `gorm:"size:40;unique;not null" json:"number"`
@@ -155,6 +157,8 @@ type RequisitionLine struct {
 }
 
 type PurchaseOrder struct {
+	IsArchived              bool                `gorm:"not null;default:false" json:"isArchived,omitempty"`
+	ArchivedAt              *time.Time          `json:"archivedAt,omitempty"`
 	ID                      uint                `gorm:"primaryKey" json:"id"`
 	AmazonPunchoutSessionID *uint               `gorm:"unique" json:"amazonPunchoutSessionId,omitempty"`
 	AmazonPayloadID         string              `gorm:"size:100" json:"amazonPayloadId,omitempty"`
@@ -245,7 +249,7 @@ type Receipt struct {
 	WarehouseStockAfter       float64   `gorm:"-" json:"warehouseStockAfter,omitempty"`
 	WarehouseDeviceCountAfter int64     `gorm:"-" json:"warehouseDeviceCountAfter,omitempty"`
 	CreatedDeviceIDs          []string  `gorm:"-" json:"createdDeviceIds,omitempty"`
-	PutawayTaskID             *int64    `gorm:"-" json:"putawayTaskId,omitempty"`
+	PutawayTaskID             *int64    `gorm:"index" json:"putawayTaskId,omitempty"`
 	ReceivedAt                time.Time `json:"receivedAt"`
 }
 

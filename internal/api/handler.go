@@ -46,6 +46,7 @@ func (h *Handler) Routes() http.Handler {
 	r := chi.NewRouter()
 	r.With(auth.RequireAdmin).Post("/mcp/master-data/{entity}/{operation}", h.masterLifecycle)
 	r.With(auth.RequireAdmin).Post("/mcp/orders/receive", h.goodsReceiptMCP)
+	r.Post("/mcp/workflows/{entity}/{operation}", h.workflowLifecycleMCP)
 	r.Get("/me", h.me)
 	r.Get("/dashboard", h.dashboard)
 	r.Get("/categories", h.listCategories)
@@ -577,7 +578,7 @@ func (h *Handler) updateSupplier(w http.ResponseWriter, r *http.Request) {
 		updated.UpdatedAt = time.Time{}
 		if previous.Active && !updated.Active {
 			var openOrders int64
-			if err := tx.Model(&models.PurchaseOrder{}).Where("supplier_id = ? AND status NOT IN ?", id, []string{"cancelled", "received"}).Count(&openOrders).Error; err != nil {
+			if err := tx.Model(&models.PurchaseOrder{}).Where("supplier_id = ? AND NOT is_archived AND status NOT IN ?", id, []string{"cancelled", "received"}).Count(&openOrders).Error; err != nil {
 				return err
 			}
 			if openOrders > 0 {
@@ -930,10 +931,10 @@ func (h *Handler) updateProduct(w http.ResponseWriter, r *http.Request) {
 		}
 		if previous.Active && !input.Active {
 			var openOrders, openRequisitions int64
-			if err := tx.Model(&models.PurchaseOrderLine{}).Joins("JOIN proc_purchase_orders po ON po.id = proc_purchase_order_lines.purchase_order_id").Where("proc_purchase_order_lines.product_id = ? AND po.status NOT IN ?", id, []string{"cancelled", "received"}).Count(&openOrders).Error; err != nil {
+			if err := tx.Model(&models.PurchaseOrderLine{}).Joins("JOIN proc_purchase_orders po ON po.id = proc_purchase_order_lines.purchase_order_id").Where("proc_purchase_order_lines.product_id = ? AND NOT po.is_archived AND po.status NOT IN ?", id, []string{"cancelled", "received"}).Count(&openOrders).Error; err != nil {
 				return err
 			}
-			if err := tx.Model(&models.RequisitionLine{}).Joins("JOIN proc_requisitions r ON r.id = proc_requisition_lines.requisition_id").Where("proc_requisition_lines.product_id = ? AND r.status IN ?", id, []string{"draft", "submitted", "approved"}).Count(&openRequisitions).Error; err != nil {
+			if err := tx.Model(&models.RequisitionLine{}).Joins("JOIN proc_requisitions r ON r.id = proc_requisition_lines.requisition_id").Where("proc_requisition_lines.product_id = ? AND NOT r.is_archived AND r.status IN ?", id, []string{"draft", "submitted", "approved"}).Count(&openRequisitions).Error; err != nil {
 				return err
 			}
 			if openOrders+openRequisitions > 0 {
@@ -1351,7 +1352,7 @@ func (h *Handler) deleteAlert(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) listRequisitions(w http.ResponseWriter, r *http.Request) {
 	user := auth.CurrentUser(r)
-	query := h.db.Preload("Lines").Preload("Lines.Product")
+	query := h.db.Preload("Lines").Preload("Lines.Product").Where("is_archived=false")
 	if !user.IsAdmin {
 		query = query.Where("requester_id = ?", user.ID)
 	}
@@ -1541,7 +1542,7 @@ func (h *Handler) updateRequisition(w http.ResponseWriter, r *http.Request) {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Preload("Lines").First(&existing, id).Error; err != nil {
 			return err
 		}
-		if existing.Status != "draft" || existing.AmazonPunchoutSessionID != nil || (!user.IsAdmin && existing.RequesterID != user.ID) {
+		if (existing.Status != "draft" && existing.Status != "returned") || existing.AmazonPunchoutSessionID != nil || (!user.IsAdmin && existing.RequesterID != user.ID) {
 			return &receiptFlowError{status: http.StatusForbidden, code: "requisition_not_editable", message: "Nur eigene Entwürfe können geändert werden"}
 		}
 		if err := validateExpectedUpdate(existing.UpdatedAt, input.ExpectedUpdatedAt, isMCPMutation(r)); err != nil {
@@ -1551,6 +1552,9 @@ func (h *Handler) updateRequisition(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		before := existing
+		if existing.Status == "returned" {
+			existing.Status = "draft"
+		}
 		existing.Title, existing.CostCenter, existing.Justification, existing.NeededBy, existing.EstimatedTotalCents = input.Title, input.CostCenter, input.Justification, input.NeededBy, input.EstimatedTotalCents
 		existing.Lines = nil
 		existing.UpdatedAt = time.Time{}
@@ -1621,6 +1625,10 @@ func (h *Handler) submitRequisition(w http.ResponseWriter, r *http.Request) {
 		before := row
 		now := time.Now()
 		row.Status, row.SubmittedAt = "submitted", &now
+		row.ApprovedBy = nil
+		row.ApprovedByName = ""
+		row.DecisionNote = ""
+		row.DecidedAt = nil
 		row.Lines = nil
 		row.UpdatedAt = time.Time{}
 		if err := tx.Save(&row).Error; err != nil {
@@ -1769,7 +1777,7 @@ func (h *Handler) convertRequisition(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) listOrders(w http.ResponseWriter, r *http.Request) {
-	query := h.db.Preload("Supplier").Preload("Lines")
+	query := h.db.Preload("Supplier").Preload("Lines").Where("is_archived=false")
 	if status := r.URL.Query().Get("status"); status != "" {
 		query = query.Where("status = ?", status)
 	}

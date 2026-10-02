@@ -51,5 +51,8 @@ func Open(dsn string) (*gorm.DB, error) {
 	if err := ensureMasterLifecycle(db); err != nil {
 		return nil, fmt.Errorf("migrate procurement master lifecycle: %w", err)
 	}
+	if err := ensureWorkflowLifecycle(db); err != nil {
+		return nil, fmt.Errorf("migrate procurement workflow lifecycle: %w", err)
+	}
 	return db, nil
 }

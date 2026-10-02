@@ -55,7 +55,7 @@ func TestCreateSupplierCommitsAuditAndReplaysOnce(t *testing.T) {
 	if err := db.Exec(`CREATE TABLE audit_log (id BIGSERIAL PRIMARY KEY, user_id BIGINT, action TEXT, entity_type TEXT, entity_id TEXT, old_values JSONB, new_values JSONB, ip_address TEXT, user_agent TEXT)`).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Exec(`CREATE TABLE proc_purchase_orders (id BIGSERIAL PRIMARY KEY, supplier_id BIGINT, status TEXT)`).Error; err != nil {
+	if err := db.Exec(`CREATE TABLE proc_purchase_orders (id BIGSERIAL PRIMARY KEY, supplier_id BIGINT, status TEXT, is_archived BOOLEAN NOT NULL DEFAULT false)`).Error; err != nil {
 		t.Fatal(err)
 	}
 	h := &Handler{db: db}

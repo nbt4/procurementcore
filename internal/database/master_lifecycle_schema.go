@@ -15,9 +15,9 @@ BEGIN
    RAISE EXCEPTION 'Separate procurement archive, restore and business edits; lifecycle preserves fields' USING ERRCODE='23514';END IF;
   IF OLD.active AND NOT NEW.active THEN
    IF TG_TABLE_NAME='proc_categories' AND EXISTS(SELECT 1 FROM proc_products WHERE category_id=OLD.id AND active) THEN RAISE EXCEPTION 'Active products block category archival' USING ERRCODE='23514';END IF;
-   IF TG_TABLE_NAME='proc_suppliers' AND EXISTS(SELECT 1 FROM proc_purchase_orders WHERE supplier_id=OLD.id AND status NOT IN ('cancelled','received')) THEN RAISE EXCEPTION 'Open orders block supplier archival' USING ERRCODE='23514';END IF;
+   IF TG_TABLE_NAME='proc_suppliers' AND EXISTS(SELECT 1 FROM proc_purchase_orders WHERE supplier_id=OLD.id AND status NOT IN ('cancelled','received') AND NOT is_archived) THEN RAISE EXCEPTION 'Open orders block supplier archival' USING ERRCODE='23514';END IF;
    IF TG_TABLE_NAME='proc_products' THEN
-    IF EXISTS(SELECT 1 FROM proc_purchase_order_lines l JOIN proc_purchase_orders o ON o.id=l.purchase_order_id WHERE l.product_id=OLD.id AND o.status NOT IN ('cancelled','received')) OR EXISTS(SELECT 1 FROM proc_requisition_lines l JOIN proc_requisitions r ON r.id=l.requisition_id WHERE l.product_id=OLD.id AND r.status IN ('draft','submitted','approved')) THEN RAISE EXCEPTION 'Open orders or requisitions block product archival' USING ERRCODE='23514';END IF;
+    IF EXISTS(SELECT 1 FROM proc_purchase_order_lines l JOIN proc_purchase_orders o ON o.id=l.purchase_order_id WHERE l.product_id=OLD.id AND o.status NOT IN ('cancelled','received') AND NOT o.is_archived) OR EXISTS(SELECT 1 FROM proc_requisition_lines l JOIN proc_requisitions r ON r.id=l.requisition_id WHERE l.product_id=OLD.id AND r.status IN ('draft','submitted','approved') AND NOT r.is_archived) THEN RAISE EXCEPTION 'Open orders or requisitions block product archival' USING ERRCODE='23514';END IF;
    END IF;
   END IF;
   IF NOT OLD.active AND NEW.active AND TG_TABLE_NAME='proc_offers' THEN

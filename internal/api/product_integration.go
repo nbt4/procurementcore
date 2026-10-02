@@ -342,7 +342,7 @@ func (h *Handler) linkWarehouseProduct(w http.ResponseWriter, r *http.Request) {
 			if err := tx.Model(&models.Receipt{}).Joins("JOIN proc_purchase_order_lines pol ON pol.id=proc_receipts.purchase_order_line_id").Where("pol.product_id=?", id).Count(&receipts).Error; err != nil {
 				return err
 			}
-			if err := tx.Model(&models.PurchaseOrderLine{}).Joins("JOIN proc_purchase_orders po ON po.id=proc_purchase_order_lines.purchase_order_id").Where("proc_purchase_order_lines.product_id=? AND po.status IN ?", id, []string{"draft", "sent", "confirmed", "partially_received"}).Count(&openOrders).Error; err != nil {
+			if err := tx.Model(&models.PurchaseOrderLine{}).Joins("JOIN proc_purchase_orders po ON po.id=proc_purchase_order_lines.purchase_order_id").Where("proc_purchase_order_lines.product_id=? AND NOT po.is_archived AND po.status IN ?", id, []string{"draft", "sent", "confirmed", "partially_received"}).Count(&openOrders).Error; err != nil {
 				return err
 			}
 			if receipts > 0 || openOrders > 0 {

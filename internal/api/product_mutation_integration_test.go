@@ -55,9 +55,9 @@ func TestProductUpdateVersionAuditArchiveAndReplay(t *testing.T) {
 	}
 	for _, statement := range []string{
 		`CREATE TABLE audit_log (id BIGSERIAL PRIMARY KEY, user_id BIGINT, action TEXT, entity_type TEXT, entity_id TEXT, old_values JSONB, new_values JSONB, ip_address TEXT, user_agent TEXT)`,
-		`CREATE TABLE proc_purchase_orders (id BIGSERIAL PRIMARY KEY, status TEXT)`,
+		`CREATE TABLE proc_purchase_orders (id BIGSERIAL PRIMARY KEY, status TEXT, is_archived BOOLEAN NOT NULL DEFAULT false)`,
 		`CREATE TABLE proc_purchase_order_lines (id BIGSERIAL PRIMARY KEY, purchase_order_id BIGINT, product_id BIGINT)`,
-		`CREATE TABLE proc_requisitions (id BIGSERIAL PRIMARY KEY, status TEXT)`,
+		`CREATE TABLE proc_requisitions (id BIGSERIAL PRIMARY KEY, status TEXT, is_archived BOOLEAN NOT NULL DEFAULT false)`,
 		`CREATE TABLE proc_requisition_lines (id BIGSERIAL PRIMARY KEY, requisition_id BIGINT, product_id BIGINT)`,
 	} {
 		if err := db.Exec(statement).Error; err != nil {

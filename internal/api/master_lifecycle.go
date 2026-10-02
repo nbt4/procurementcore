@@ -170,12 +170,12 @@ func (h *Handler) masterLifecycle(w http.ResponseWriter, r *http.Request) {
 			queries = append(queries, struct{ key, query string }{"products", `SELECT id AS product_id,sku,name,active,updated_at FROM proc_products WHERE category_id=?`})
 		case "suppliers":
 			queries = append(queries,
-				struct{ key, query string }{"open_orders", `SELECT id AS order_id,number,status,updated_at FROM proc_purchase_orders WHERE supplier_id=? AND status NOT IN ('cancelled','received')`},
+				struct{ key, query string }{"open_orders", `SELECT id AS order_id,number,status,updated_at FROM proc_purchase_orders WHERE supplier_id=? AND status NOT IN ('cancelled','received') AND NOT is_archived`},
 				struct{ key, query string }{"offers", `SELECT id AS offer_id,product_id,active,updated_at FROM proc_offers WHERE supplier_id=?`})
 		case "products":
 			queries = append(queries,
-				struct{ key, query string }{"open_orders", `SELECT DISTINCT po.id AS order_id,po.number,po.status,po.updated_at FROM proc_purchase_order_lines l JOIN proc_purchase_orders po ON po.id=l.purchase_order_id WHERE l.product_id=? AND po.status NOT IN ('cancelled','received')`},
-				struct{ key, query string }{"open_requisitions", `SELECT DISTINCT rq.id AS requisition_id,rq.number,rq.status,rq.updated_at FROM proc_requisition_lines l JOIN proc_requisitions rq ON rq.id=l.requisition_id WHERE l.product_id=? AND rq.status IN ('draft','submitted','approved')`},
+				struct{ key, query string }{"open_orders", `SELECT DISTINCT po.id AS order_id,po.number,po.status,po.updated_at FROM proc_purchase_order_lines l JOIN proc_purchase_orders po ON po.id=l.purchase_order_id WHERE l.product_id=? AND po.status NOT IN ('cancelled','received') AND NOT po.is_archived`},
+				struct{ key, query string }{"open_requisitions", `SELECT DISTINCT rq.id AS requisition_id,rq.number,rq.status,rq.updated_at FROM proc_requisition_lines l JOIN proc_requisitions rq ON rq.id=l.requisition_id WHERE l.product_id=? AND rq.status IN ('draft','submitted','approved') AND NOT rq.is_archived`},
 				struct{ key, query string }{"offers", `SELECT id AS offer_id,supplier_id,active,updated_at FROM proc_offers WHERE product_id=?`},
 				struct{ key, query string }{"warehouse_links", `SELECT id AS link_id,warehouse_product_id,updated_at FROM core_product_links WHERE procurement_product_id=?`},
 				struct{ key, query string }{"category", `SELECT c.id AS category_id,c.name,c.updated_at,COALESCE((to_jsonb(c)->>'active')::boolean,true) AS active FROM proc_categories c JOIN proc_products p ON p.category_id=c.id WHERE p.id=?`})
