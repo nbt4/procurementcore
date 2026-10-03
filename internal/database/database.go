@@ -60,5 +60,8 @@ func Open(dsn string) (*gorm.DB, error) {
 	if err := ensureOrderSubmissions(db); err != nil {
 		return nil, fmt.Errorf("migrate supplier submission guards: %w", err)
 	}
+	if err := ensureSubmissionReconciliations(db); err != nil {
+		return nil, fmt.Errorf("migrate human supplier verification: %w", err)
+	}
 	return db, nil
 }

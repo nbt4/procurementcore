@@ -1,5 +1,35 @@
 # ProcurementCore
 
+## Ungewisse Übermittlungen menschlich klären — Procurement 1.0.75 / MCP 1.5.50
+
+`procurement.orders.prepare_reconcile_submission/reconcile_submission` dokumentiert
+eine abgeschlossene menschliche Prüfung im korrekten Lieferantenkonto. `found_order`
+verlangt die gefundene Lieferanten-Bestellnummer; `confirmed_not_sent` verlangt
+nachvollziehbare Geschäftsevidenz und storniert den ursprünglichen Auftrag.
+Ein Timeout, eine leere Suche oder eine KI-Vermutung beweist keine Nichtübermittlung.
+Die Werkzeuge kontaktieren den Lieferanten nicht, erzeugen keine Bestellung und
+buchen keinen Bestand. Neue Nachfrage benötigt einen separat freigegebenen Warenkorb.
+
+Aktueller aktiver Admin und expliziter `cores:procurement:send`-Scope gelten vor jeder
+Vorschau, Ausführung und Wiederholung. Frühestens 15 Minuten nach dem ursprünglichen
+Übermittlungsauftrag darf geklärt werden; bekannte positive Bestätigungen, vorhandene
+Lieferantenbestätigungen/Wareneingänge und bereits geklärte Aufträge blockieren den
+Ablauf. Vollständiger Auftrag, ursprünglicher Übermittlungsauftrag/geprüfter Payload,
+Referenzen, Ergebnis, Evidenz und erwartete Wirkung binden Version/Kontext und die
+exakte `RECONCILE ... HUMAN VERIFIED ...`-Phrase. Zusätzlich sind `human_verified`,
+`confirm_reconcile` und ein unveränderter Idempotenzschlüssel erforderlich.
+
+Originalanspruch, Lieferantenantwort und Positionen bleiben erhalten. Klärungsbeleg,
+Bestellstatus, vollständiger MCP/AI-Audit, native Aktivität und Wiederholungsantwort
+werden atomar gespeichert. Native `013` / Root `042` schützen Klärungsbelege gegen
+Änderung/Löschung; der ursprüngliche Auftrag bleibt gegen erneuten Versand gesperrt.
+Historische Übermittlungsbelege behalten ihr damaliges Ergebnis; der Klärungsbeleg
+und aktuelle Auftrag dokumentieren die spätere menschliche Entscheidung. Zeitwerte
+der Übermittlungs-/Klärungsbelege werden unabhängig von der Host-Zeitzone in UTC
+angelegt. Katalog: 389 Werkzeuge (105 Abfragen / 142 Vorschauen / 142 Ausführungen).
+Adam-Hall-Übermittlung und die übrigen Abnahmepunkte von #4/#5 bleiben offen.
+
+
 ## Amazon-Bestellungen sicher absenden — Procurement 1.0.74 / MCP 1.5.49
 
 `procurement.orders.prepare_send_amazon/send_amazon` übermittelt einen vollständig

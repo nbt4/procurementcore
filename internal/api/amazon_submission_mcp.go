@@ -262,7 +262,7 @@ func (h *Handler) runAmazonSubmission(w http.ResponseWriter, r *http.Request, in
 		if err != nil {
 			return err
 		}
-		claimed = orderSubmissionRecord{PurchaseOrderID: input.ID, Provider: "amazon", UserID: auth.CurrentUser(r).ID, PayloadID: hex.EncodeToString(random[:]) + "@procurementcore", ExpectedContext: p["expected_context"].(string), Status: "pending", Outcome: json.RawMessage(`{}`), ReviewedPayload: json.RawMessage(reviewedPayload)}
+		claimed = orderSubmissionRecord{PurchaseOrderID: input.ID, Provider: "amazon", UserID: auth.CurrentUser(r).ID, PayloadID: hex.EncodeToString(random[:]) + "@procurementcore", ExpectedContext: p["expected_context"].(string), Status: "pending", Outcome: json.RawMessage(`{}`), ReviewedPayload: json.RawMessage(reviewedPayload), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
 		if err := tx.Create(&claimed).Error; err != nil {
 			return err
 		}

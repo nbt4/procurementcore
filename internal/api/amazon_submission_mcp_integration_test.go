@@ -107,7 +107,7 @@ func TestAmazonSubmissionDurablePhasesNoDuplicateAndCurrentRights(t *testing.T) 
 	}
 	count := func() string {
 		var out string
-		if err := db.Raw("SELECT jsonb_build_array((SELECT count(*) FROM proc_purchase_orders),(SELECT count(*) FROM proc_purchase_order_lines),(SELECT count(*) FROM proc_idempotency_records),(SELECT count(*) FROM audit_log),(SELECT count(*) FROM proc_activities),(SELECT jsonb_agg(status ORDER BY id) FROM proc_purchase_orders),(SELECT jsonb_agg(status ORDER BY id) FROM proc_order_submissions))::text").Row().Scan(&out); err != nil {
+		if err := db.Raw("SELECT jsonb_build_array((SELECT count(*) FROM proc_purchase_orders),(SELECT count(*) FROM proc_purchase_order_lines),(SELECT count(*) FROM proc_idempotency_records),(SELECT count(*) FROM audit_log),(SELECT count(*) FROM proc_activities),(SELECT jsonb_agg(status ORDER BY id) FROM proc_purchase_orders),(SELECT jsonb_agg(status ORDER BY id) FROM proc_order_submissions),(SELECT count(*) FROM proc_submission_reconciliations))::text").Row().Scan(&out); err != nil {
 			t.Fatal(err)
 		}
 		return out
@@ -335,4 +335,132 @@ func TestAmazonSubmissionDurablePhasesNoDuplicateAndCurrentRights(t *testing.T) 
 	if status, _ := callHandler(handler, 1, "cores:procurement:send", "public-bypass", "POST", fmt.Sprintf("/orders/%d/amazon/submit", order.ID), map[string]any{}); status != 428 {
 		t.Fatal("old MCP shortcut", status)
 	}
+	t.Run("human verification retains original claim without supplier calls", func(t *testing.T) {
+		reconcile := func(uid uint, scope, key string, in map[string]any) (int, map[string]any) {
+			return callHandler(handler, uid, scope, key, "POST", "/mcp/orders/reconcile-submission", in)
+		}
+		seed := func(state string, created time.Time) (models.PurchaseOrder, orderSubmissionRecord) {
+			row := newOrder()
+			p := review("send", map[string]any{"id": row.ID, "preview": true})
+			raw, _ := json.Marshal(p)
+			submission := orderSubmissionRecord{PurchaseOrderID: int64(row.ID), Provider: "amazon", UserID: 1, PayloadID: fmt.Sprintf("human-check-%d@fixture", row.ID), ExpectedContext: p["expected_context"].(string), Status: state, Outcome: json.RawMessage(`{"acknowledged":false}`), ReviewedPayload: json.RawMessage(raw), CreatedAt: created.UTC(), UpdatedAt: created.UTC()}
+			if err := db.Create(&submission).Error; err != nil {
+				t.Fatal(err)
+			}
+			must(db, "UPDATE proc_purchase_orders SET status='submission_unknown',amazon_payload_id=? WHERE id=?", submission.PayloadID, row.ID)
+			if err := db.First(&submission, submission.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			return row, submission
+		}
+		requestsBefore := requests.Load()
+		for _, resolution := range []string{"found_order", "confirmed_not_sent"} {
+			row, original := seed("unknown", time.Now().Add(-time.Hour))
+			args := map[string]any{"id": row.ID, "resolution": resolution, "verification_evidence": "Human checked correct supplier account and original payload identity", "human_verified": true, "preview": true}
+			if resolution == "found_order" {
+				args["supplier_order_number"] = fmt.Sprintf("HUMAN-SUPPLIER-%d", row.ID)
+			}
+			before := count()
+			code, p := reconcile(1, "cores:procurement:send", "", args)
+			if code != 200 || p["ready_to_execute"] != true || count() != before || requests.Load() != requestsBefore {
+				t.Fatal("pure human preview", code, p)
+			}
+			for _, uid := range []uint{2, 3} {
+				if code, _ := reconcile(uid, "cores:procurement:send", "", args); code != 403 {
+					t.Fatal("member reconciliation", code)
+				}
+			}
+			if code, _ := reconcile(1, "cores:write", "", args); code != 403 {
+				t.Fatal("legacy send scope", code)
+			}
+			unsigned := clone(args)
+			unsigned["human_verified"] = false
+			if code, p := reconcile(1, "cores:procurement:send", "", unsigned); code != 200 || p["ready_to_execute"] != false {
+				t.Fatal("unverified supplier evidence", code, p)
+			}
+			a := final(args, p)
+			tampered := clone(a)
+			tampered["verification_evidence"] = "Different human verification evidence"
+			if code, p := reconcile(1, "cores:procurement:send", "human-evidence-stale", tampered); code != 200 || p["ready_to_execute"] != false {
+				t.Fatal("stale evidence", code, p)
+			}
+			weak := clone(a)
+			weak["confirmation_text"] = "RECONCILE"
+			if code, _ := reconcile(1, "cores:procurement:send", "human-weak", weak); code != 428 {
+				t.Fatal("human phrase", code)
+			}
+			must(db, "UPDATE proc_purchase_orders SET notes='Intervening native note' WHERE id=?", row.ID)
+			if code, p := reconcile(1, "cores:procurement:send", "human-order-stale", a); code != 200 || p["ready_to_execute"] != false {
+				t.Fatal("stale native record", code, p)
+			}
+			code, p = reconcile(1, "cores:procurement:send", "", args)
+			if code != 200 || p["ready_to_execute"] != true {
+				t.Fatal(code, p)
+			}
+			a = final(args, p)
+			before = count()
+			key := fmt.Sprintf("human-reconciliation-%d", row.ID)
+			must(db, `CREATE OR REPLACE FUNCTION reject_send_audit() RETURNS TRIGGER AS $$ BEGIN IF NEW.action='order.submission_reconciled' THEN RAISE EXCEPTION 'forced human verification audit';END IF;RETURN NEW;END $$ LANGUAGE plpgsql;CREATE TRIGGER reject_send_audit BEFORE INSERT ON audit_log FOR EACH ROW EXECUTE FUNCTION reject_send_audit()`)
+			if code, _ := reconcile(1, "cores:procurement:send", key, a); code != 500 || count() != before || requests.Load() != requestsBefore {
+				t.Fatal("human audit atomicity", code)
+			}
+			must(db, "DROP TRIGGER reject_send_audit ON audit_log")
+			code, result := reconcile(1, "cores:procurement:send", key, a)
+			if code != 200 || result["operation_status"] != "reconciled" || requests.Load() != requestsBefore {
+				t.Fatal("human reconciliation", code, result)
+			}
+			expected := "sent"
+			if resolution == "confirmed_not_sent" {
+				expected = "cancelled"
+			}
+			po := result["purchase_order"].(map[string]any)
+			if po["status"] != expected || len(po["lines"].([]any)) != 1 || po["lines"].([]any)[0].(map[string]any)["id"] != float64(row.Lines[0].ID) {
+				t.Fatal("retained original lines", result)
+			}
+			booked := count()
+			code, replay := reconcile(1, "cores:procurement:send", key, a)
+			if code != 200 || !reflect.DeepEqual(result, replay) || count() != booked {
+				t.Fatal("human durable replay", code, replay)
+			}
+			must(db, "UPDATE users SET is_admin=false WHERE userid=1")
+			if code, _ := reconcile(1, "cores:procurement:send", key, a); code != 403 {
+				t.Fatal("revoked human replay", code)
+			}
+			must(db, "UPDATE users SET is_admin=true WHERE userid=1")
+			var retained orderSubmissionRecord
+			if err := db.First(&retained, original.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			left, _ := json.Marshal(original)
+			right, _ := json.Marshal(retained)
+			var leftMap, rightMap map[string]any
+			_ = json.Unmarshal(left, &leftMap)
+			_ = json.Unmarshal(right, &rightMap)
+			if !reflect.DeepEqual(leftMap, rightMap) {
+				t.Fatal("original supplier acknowledgement changed", string(left), string(right))
+			}
+			for _, q := range []string{"DELETE FROM proc_submission_reconciliations WHERE submission_id=?", "UPDATE proc_submission_reconciliations SET resolution='confirmed_not_sent' WHERE submission_id=?"} {
+				if err := db.Exec(q, original.ID).Error; err == nil {
+					t.Fatal("human verification retention", q)
+				}
+			}
+			if err := db.Exec("UPDATE proc_purchase_orders SET status='draft' WHERE id=?", row.ID).Error; err == nil {
+				t.Fatal("resolved order reopened")
+			}
+			if code, p := call(1, "send", "", map[string]any{"id": row.ID, "preview": true}); code != 200 || p["ready_to_execute"] != false || requests.Load() != requestsBefore {
+				t.Fatal("resolved order resent", code, p)
+			}
+		}
+		row, _ := seed("pending", time.Now())
+		args := map[string]any{"id": row.ID, "resolution": "confirmed_not_sent", "verification_evidence": "Human checked supplier account and original payload", "human_verified": true, "preview": true}
+		if code, p := reconcile(1, "cores:procurement:send", "", args); code != 200 || p["ready_to_execute"] != false || !strings.Contains(fmt.Sprint(p["required_fields"]), "15_minutes") {
+			t.Fatal("live supplier attempt reconciled", code, p)
+		}
+		row, _ = seed("accepted", time.Now().Add(-time.Hour))
+		args["id"] = row.ID
+		if code, p := reconcile(1, "cores:procurement:send", "", args); code != 200 || p["ready_to_execute"] != false {
+			t.Fatal("known acknowledgement denied", code, p)
+		}
+	})
+
 }
