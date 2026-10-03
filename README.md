@@ -1,5 +1,36 @@
 # ProcurementCore
 
+## Bedarf in Bestellung umwandeln — Procurement 1.0.73 / MCP 1.5.48
+
+`procurement.requisitions.prepare_order/order` wandelt einen bereits freigegebenen,
+aktiven Bedarf genau einmal in einen Lieferanten-Bestellentwurf um. Erforderlich
+sind aktuelle Administratorrechte, die signierte Aktion `cores:procurement:create`,
+die exakte Bedarfs-Version, der vollständige Vorschau-Kontext und die an Bedarf,
+Lieferant und Kontext gebundene Bestätigungsphrase. Auch gespeicherte und im MCP
+zwischengespeicherte Ergebnisse prüfen die aktuellen Rechte erneut.
+
+Die Vorschau enthält sämtliche ursprünglichen Felder und Positionen, den gewählten
+Lieferanten, Produkt-/Lieferanten-Versionen, alle Angebotskandidaten, die ausgewählten
+Angebote und den vollständigen neuen Bestellentwurf. Die native Preisregel bleibt
+bestehen: Das günstigste aktive Lieferantenangebot liefert den Preis, sofern der
+Bedarf keinen Schätzpreis für diesen bevorzugten Lieferanten vorgibt. Bei gleichen
+Preisen entscheidet die Angebots-ID. Eine fehlende Einkaufs-URL kommt aus dem Angebot.
+Abgelaufene Angebote, abweichende Preiswährung, Mindestmengen und Verpackungseinheiten
+müssen vorab korrigiert werden; Bedarfsmengen werden niemals stillschweigend gerundet.
+Amazon-Bedarfe behalten Sitzung und Lieferanten-Positionsreferenzen und müssen den
+ursprünglichen Amazon-Business-Lieferanten verwenden. Die separate Lieferantenübermittlung
+wird durch diese Umwandlung nicht ausgelöst.
+
+Bestellentwurf, Bedarfsstatus `ordered`, beide vollständigen Audits, beide nativen
+Aktivitäten und dauerhafte Wiederholungsantwort sind eine Transaktion. Ursprüngliche
+Bedarfsfelder, Freigabe und Positions-IDs bleiben erhalten. Gleichzeitige Aufrufe
+erzeugen nur eine Bestellung. Der vorhandene UI/API-Ablauf prüft den Bedarf ebenfalls
+erst unter derselben Transaktionssperre und schreibt beide Audits atomar; der alte
+ungeführte MCP-Zugriff erhält 428 und muss neu vorbereitet werden. Vorschau und Dry-run
+ändern keine Daten. Es werden weder Lieferanten-Nachrichten versendet noch Bestände
+gebucht. Der Katalog umfasst 385 Werkzeuge (105 Abfragen / 140 Vorschauen / 140
+Ausführungen). Keine neue Migration. Die übrigen Abnahmepunkte von #4/#5 bleiben offen.
+
 ## Vollständige Bestellentwürfe — Procurement 1.0.72 / MCP 1.5.47
 
 Die vier bestehenden Create-/Update-Werkzeuge für Bestellungen delegieren an

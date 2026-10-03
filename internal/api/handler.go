@@ -50,6 +50,7 @@ func (h *Handler) Routes() http.Handler {
 	r.With(auth.RequireAdmin).Post("/mcp/approvals/{entity}", h.approvalMCP)
 	r.Post("/mcp/requisitions/{operation}", h.requisitionDraftMCP)
 	r.With(auth.RequireAdmin).Post("/mcp/order-drafts/{operation}", h.orderDraftMCP)
+	r.With(auth.RequireAdmin).Post("/mcp/requisition-orders", h.requisitionOrderMCP)
 	r.Get("/me", h.me)
 	r.Get("/dashboard", h.dashboard)
 	r.Get("/categories", h.listCategories)
@@ -1709,65 +1710,71 @@ func (h *Handler) convertRequisition(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// No earlier conversion endpoint produced durable MCP receipts. Require the
+	// named final-context workflow rather than accepting an unreviewed shortcut.
+	if isMCPMutation(r) {
+		writeJSON(w, 428, map[string]string{"error": "Prepare the named requisition order workflow with exact final context"})
+		return
+	}
 	var input struct {
-		SupplierID       uint       `json:"supplierId"`
-		ExpectedDelivery *time.Time `json:"expectedDelivery"`
+		SupplierID        uint       `json:"supplierId"`
+		ExpectedDelivery  *time.Time `json:"expectedDelivery"`
+		ExpectedUpdatedAt *time.Time `json:"expectedUpdatedAt"`
 	}
 	if !decode(w, r, &input) {
 		return
 	}
-	if input.SupplierID == 0 {
+	if input.SupplierID == 0 || input.SupplierID > math.MaxInt32 {
 		badRequest(w, "Lieferant ist erforderlich")
 		return
 	}
-	var req models.Requisition
-	if err := h.db.Preload("Lines").First(&req, id).Error; err != nil {
-		notFound(w)
-		return
-	}
-	if req.Status != "approved" {
-		badRequest(w, "Nur freigegebene Bedarfe können bestellt werden")
-		return
-	}
-	if req.AmazonPunchoutSessionID != nil {
-		var amazonSupplier models.Supplier
-		if err := h.db.Where("code = ?", "AMAZON-BUSINESS").First(&amazonSupplier).Error; err != nil || input.SupplierID != amazonSupplier.ID {
-			badRequest(w, "Amazon-PunchOut-Bedarf muss über Amazon Business bestellt werden")
-			return
-		}
-	}
-	user := auth.CurrentUser(r)
-	order := models.PurchaseOrder{Number: nextNumber("PO"), SupplierID: input.SupplierID, RequisitionID: &req.ID, Status: "draft", Currency: "EUR", OrderedBy: user.ID, OrderedByName: user.Username, ExpectedDelivery: input.ExpectedDelivery}
-	order.AmazonPunchoutSessionID = req.AmazonPunchoutSessionID
-	for _, line := range req.Lines {
-		price, link := line.EstimatedPriceCents, line.PurchaseURL
-		if line.ProductID != nil && req.AmazonPunchoutSessionID == nil {
-			var offer models.Offer
-			if err := h.db.Where("product_id = ? AND supplier_id = ? AND active = ?", *line.ProductID, input.SupplierID, true).Order("price_cents").First(&offer).Error; err == nil {
-				if line.PreferredSupplierID == nil || *line.PreferredSupplierID != input.SupplierID {
-					price = offer.PriceCents
-				}
-				if link == "" {
-					link = offer.PurchaseURL
-				}
-			}
-		}
-		order.Lines = append(order.Lines, models.PurchaseOrderLine{ProductID: line.ProductID, SupplierPartID: line.SupplierPartID, SupplierPartAuxiliaryID: line.SupplierPartAuxiliaryID, Description: line.Description, Quantity: line.Quantity, Unit: line.Unit, UnitPriceCents: price, PurchaseURL: link})
-	}
-	order.TotalCents = service.PurchaseOrderTotal(order.Lines)
-	err := h.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(&order).Error; err != nil {
+	var order models.PurchaseOrder
+	err := h.db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec(`SET LOCAL lock_timeout='5s';SET LOCAL statement_timeout='20s';SET LOCAL TIME ZONE 'UTC'`).Error; err != nil {
 			return err
 		}
-		req.Status = "ordered"
-		return tx.Save(&req).Error
+		if err := currentProcurementApprovalRights(tx, r, "orders", 0); err != nil {
+			return err
+		}
+		idempotency, replay, err := beginIdempotentMutation(tx, r, "requisition_order", map[string]any{"id": id, "input": input})
+		if err != nil {
+			return err
+		}
+		if replay != nil {
+			return json.Unmarshal(replay, &order)
+		}
+		if err := lockRequisitionOrderContext(tx); err != nil {
+			return err
+		}
+		request := requisitionOrderRequest{ID: int64(id), SupplierID: input.SupplierID, ExpectedDelivery: input.ExpectedDelivery}
+		p, draft, err := prepareRequisitionOrder(tx, r, request, false)
+		if err != nil {
+			return err
+		}
+		if p["ready_to_execute"] != true {
+			return &receiptFlowError{status: 409, code: "requisition_order_blocked", message: fmt.Sprint(p["required_fields"])}
+		}
+		if input.ExpectedUpdatedAt != nil {
+			var req models.Requisition
+			if err := tx.First(&req, id).Error; err != nil {
+				return err
+			}
+			if err := validateExpectedUpdate(req.UpdatedAt, input.ExpectedUpdatedAt, false); err != nil {
+				return err
+			}
+		}
+		result, err := commitRequisitionOrder(tx, r, int64(id), p["current"], draft)
+		if err != nil {
+			return err
+		}
+		order = result["purchase_order"].(models.PurchaseOrder)
+		return completeIdempotentMutation(tx, idempotency, 201, order)
 	})
 	if err != nil {
-		conflictOrServer(w, err)
+		writeProcurementFlowError(w, err)
 		return
 	}
-	h.activity(r, "purchase_order", order.ID, "created_from_requisition", order.Number)
-	writeJSON(w, http.StatusCreated, order)
+	writeJSON(w, 201, order)
 }
 
 func (h *Handler) listOrders(w http.ResponseWriter, r *http.Request) {
