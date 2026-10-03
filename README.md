@@ -1,5 +1,47 @@
 # ProcurementCore
 
+## Amazon-Bestellungen sicher absenden — Procurement 1.0.74 / MCP 1.5.49
+
+`procurement.orders.prepare_send_amazon/send_amazon` übermittelt einen vollständig
+geprüften Amazon-Business-Bestellentwurf. Nur aktuelle Administratoren mit dem
+expliziten Scope `cores:procurement:send` dürfen diese Werkzeuge verwenden;
+`cores:write`, Create, Update, Approve und Bedarf-Submit reichen nicht aus.
+Die OAuth-Freigabe erklärt dieses gesondert angefragte Senderecht in Deutsch und
+Englisch. Lesender Zugriff bleibt voreingestellt. Für Ausführung und Replay gelten
+dieselben aktuellen Rechte; die konkrete bezahlte Bestellung wird erneut bestätigt.
+
+Die reine Vorschau bindet vollständigen Auftrag/Positionen, den ursprünglichen
+freigegebenen Bedarf, aktive Referenzen, den tatsächlichen Lieferanten-Payload,
+EUR-Gesamtbetrag, Liefer- und Rechnungsadresse, Konto-Fingerprint und Test-/Live-Modus
+an exakte Version, vollständigen Kontext und eine Auftrag/Betrag/Kontext-Phrase.
+Ein ursprünglicher Bedarf mit Entscheidung eines anderen Nutzers ist zwingend;
+Artikelreferenzen, Mengen und Preise müssen seinem freigegebenen Warenkorb entsprechen.
+Gemeinsame Secrets und authentifiziertes cXML werden weder ausgegeben noch gespeichert.
+Vorschau und Dry-run kontaktieren den Lieferanten nicht und verändern keine Daten.
+
+Vor dem einmaligen externen Aufruf werden ein eindeutiger dauerhafter Übermittlungs-
+auftrag, der vollständige geprüfte Geschäftskontext, der native Status, Audit und
+Idempotenz-Beleg atomar gespeichert. Eine Lieferantenbestätigung wird separat
+mit Audit/Aktivität gesichert; danach werden lokaler Bestellstatus, Audit und
+Erfolgsbeleg atomar abgeschlossen. Ein später lokaler Fehler lässt sich mit dem
+ursprünglichen unveränderten Schlüssel aus der gespeicherten Bestätigung abschließen,
+ohne erneut zu senden. Die Datenbank und Amazon können keine gemeinsame Transaktion
+bilden. Bei Timeout, verlorener Antwort oder Prozessabbruch bleibt `pending` bzw.
+`submission_unknown` erhalten: im Amazon-Business-Konto prüfen und niemals automatisch
+erneut bestellen. Fehlerantworten weisen ausdrücklich auf den möglichen externen
+Auftrag hin. Neuer Schlüssel, Neustart oder Zurücksetzen des alten API-Status umgehen
+die dauerhafte Sperre nicht.
+
+Native `012` / Root `041` bewahren Übermittlungsidentität, geprüften Kontext und
+Originalpositionen; sie blockieren Löschung, kommerzielle Positionsänderung und
+Zurücksetzen zur erneuten Übermittlung für alle Schreiber. Wareneingang und
+Bestandsbuchung bleiben eigene Vorgänge. Der bestehende UI-Amazon-Aufruf verwendet
+jetzt dieselben dauerhaften Phasen und Audits; der alte ungeführte MCP-Aufruf verlangt
+neue Vorbereitung (428). Der Katalog enthält 387 Werkzeuge (105 Abfragen / 141
+Vorschauen / 141 Ausführungen). Adam-Hall-Übermittlung und weitere Abnahmepunkte von
+#4/#5 bleiben offen. Produktion wird ausschließlich lesend geprüft; Übermittlungstests
+verwenden einen lokalen TLS-Lieferanten-Mock mit isolierten Testzugängen.
+
 ## Bedarf in Bestellung umwandeln — Procurement 1.0.73 / MCP 1.5.48
 
 `procurement.requisitions.prepare_order/order` wandelt einen bereits freigegebenen,

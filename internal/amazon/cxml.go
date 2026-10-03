@@ -101,6 +101,13 @@ func (c *Client) ReadyToOrder() bool {
 	return c != nil && c.cfg.OrderURL != "" && c.cfg.ShipTo.Complete() && c.cfg.BillTo.Complete()
 }
 func (c *Client) ShipTo() Address { return c.cfg.ShipTo }
+
+// SubmissionReview exposes business destinations and an opaque account identity,
+// never the shared secret, endpoint credentials or generated authenticated XML.
+func (c *Client) SubmissionReview() map[string]any {
+	account := sha256.Sum256([]byte(c.cfg.FromIdentity))
+	return map[string]any{"mode": c.cfg.Mode, "ship_to": c.cfg.ShipTo, "bill_to": c.cfg.BillTo, "buyer_account_fingerprint": hex.EncodeToString(account[:])}
+}
 func (c *Client) VerifyConfirmationCredentials(username, password string) bool {
 	if c == nil || username == "" || password == "" {
 		return false

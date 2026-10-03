@@ -51,6 +51,7 @@ func (h *Handler) Routes() http.Handler {
 	r.Post("/mcp/requisitions/{operation}", h.requisitionDraftMCP)
 	r.With(auth.RequireAdmin).Post("/mcp/order-drafts/{operation}", h.orderDraftMCP)
 	r.With(auth.RequireAdmin).Post("/mcp/requisition-orders", h.requisitionOrderMCP)
+	r.With(auth.RequireAdmin).Post("/mcp/orders/send-amazon", h.amazonSubmissionMCP)
 	r.Get("/me", h.me)
 	r.Get("/dashboard", h.dashboard)
 	r.Get("/categories", h.listCategories)

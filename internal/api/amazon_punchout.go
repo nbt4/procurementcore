@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -169,8 +168,8 @@ func (h *Handler) HandleAmazonReturn(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) submitAmazonOrder(w http.ResponseWriter, r *http.Request) {
-	if h.amazon == nil || !h.amazon.ReadyToOrder() {
-		badRequest(w, "Amazon-Bestellung ist noch nicht vollständig konfiguriert")
+	if isMCPMutation(r) {
+		writeJSON(w, 428, map[string]string{"error": "Prepare the named supplier submission with exact final consent"})
 		return
 	}
 	id, err := parseAmazonOrderID(r)
@@ -178,64 +177,7 @@ func (h *Handler) submitAmazonOrder(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, "Ungültige Bestellnummer")
 		return
 	}
-	var row models.PurchaseOrder
-	if err := h.db.Preload("Lines").First(&row, id).Error; err != nil {
-		notFound(w)
-		return
-	}
-	if row.AmazonPunchoutSessionID == nil || row.Status != "draft" || len(row.Lines) == 0 {
-		badRequest(w, "Keine bestellbare Amazon-PunchOut-Bestellung")
-		return
-	}
-	lines := make([]amazon.OrderLine, 0, len(row.Lines))
-	for _, line := range row.Lines {
-		if math.Trunc(line.Quantity) != line.Quantity || line.Quantity < 1 || line.Quantity > 999 || line.SupplierPartID == "" || line.SupplierPartAuxiliaryID == "" {
-			badRequest(w, "Amazon-Artikelkennung oder ganzzahlige Menge fehlt")
-			return
-		}
-		lines = append(lines, amazon.OrderLine{SupplierPartID: line.SupplierPartID, SupplierPartAuxiliaryID: line.SupplierPartAuxiliaryID, Description: line.Description, Quantity: int(line.Quantity), Unit: line.Unit, UnitPriceCents: line.UnitPriceCents})
-	}
-	var random [16]byte
-	if _, err := rand.Read(random[:]); err != nil {
-		serverError(w, err)
-		return
-	}
-	payloadID := hex.EncodeToString(random[:]) + "@procurementcore"
-	claimed := h.db.Model(&models.PurchaseOrder{}).Where("id = ? AND status = 'draft' AND amazon_punchout_session_id IS NOT NULL", id).Updates(map[string]any{"status": "submitting", "amazon_payload_id": payloadID})
-	if claimed.Error != nil {
-		serverError(w, claimed.Error)
-		return
-	}
-	if claimed.RowsAffected != 1 {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "Bestellung wird bereits übertragen oder wurde schon gesendet"})
-		return
-	}
-	err = h.amazon.Submit(r.Context(), amazon.Order{Number: row.Number, Lines: lines}, payloadID)
-	if err != nil {
-		_ = h.db.Model(&models.PurchaseOrder{}).Where("id = ? AND status = 'submitting'", id).Update("status", "submission_unknown").Error
-		h.activity(r, "purchase_order", id, "amazon_submission_unknown", row.Number)
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "Amazon-Bestellstatus unklar. Bitte im Amazon Business Konto prüfen und nicht erneut bestellen."})
-		return
-	}
-	now := time.Now()
-	updated := h.db.Model(&models.PurchaseOrder{}).Where("id = ? AND status = 'submitting'", id).Updates(map[string]any{"status": "sent", "order_date": now})
-	if updated.Error != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Amazon hat die Bestellung bestätigt; lokaler Status muss geprüft werden"})
-		return
-	}
-	if updated.RowsAffected != 1 {
-		var current models.PurchaseOrder
-		if err := h.db.First(&current, id).Error; err != nil || current.Status == "submitting" {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Amazon hat die Bestellung bestätigt; lokaler Status muss geprüft werden"})
-			return
-		}
-	}
-	h.activity(r, "purchase_order", id, "ordered_at_amazon", row.Number)
-	if err := h.db.Preload("Supplier").Preload("Lines").First(&row, id).Error; err != nil {
-		serverError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, row)
+	h.runAmazonSubmission(w, r, amazonSubmissionRequest{ID: int64(id)}, true)
 }
 
 func parseAmazonOrderID(r *http.Request) (uint, error) {

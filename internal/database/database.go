@@ -57,5 +57,8 @@ func Open(dsn string) (*gorm.DB, error) {
 	if err := ensureWorkflowReferences(db); err != nil {
 		return nil, fmt.Errorf("migrate procurement workflow references: %w", err)
 	}
+	if err := ensureOrderSubmissions(db); err != nil {
+		return nil, fmt.Errorf("migrate supplier submission guards: %w", err)
+	}
 	return db, nil
 }
