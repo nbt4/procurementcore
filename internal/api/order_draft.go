@@ -18,10 +18,7 @@ func (h *Handler) updateOrderDraft(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var input struct {
-		models.PurchaseOrder
-		ExpectedUpdatedAt *time.Time `json:"expectedUpdatedAt"`
-	}
+	var input orderDraftUpdateInput
 	if !decode(w, r, &input) {
 		return
 	}

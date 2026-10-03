@@ -1,5 +1,34 @@
 # ProcurementCore
 
+## Vollständige Bestellentwürfe — Procurement 1.0.72 / MCP 1.5.47
+
+Die vier bestehenden Create-/Update-Werkzeuge für Bestellungen delegieren an
+`/api/v1/mcp/order-drafts/{create|update}`. Aktuelle aktive Administratorrechte
+und die signierte passende Aktion gelten vor jedem neuen, gecachten, alten oder
+nach Neustart gespeicherten Ergebnis. Vollständige Kopfdaten, Positionswerte,
+kanonische Gesamtwerte, aktive Lieferanten/Produkte, ursprünglicher Bedarf,
+Wareneingänge und doppelte Lieferanten-Bestellnummern gehören zur exakten Vorschau.
+Ausführung verlangt `expected_context`, bei Änderung `expected_updated_at`, die
+vollständige gebundene Phrase, `confirm_creation` bzw. `confirm_update` und einen
+Idempotenzschlüssel. Vorschau und Dry-Run verändern keine Daten.
+
+Ausgelassene Positionen behalten IDs und native Zusatzfelder; eine vollständige
+Positionsliste kann vorhandene `line_id` erhalten und neue Zeilen ergänzen.
+Vorschau und Speicherung verwenden dieselbe native ID-Reihenfolge. Teilmengen
+und Preise berechnen denselben Gesamtwert wie der native Bestellprozess.
+Create verwendet Datumswerte in YYYY-MM-DD, Update RFC3339; leere Update-Daten
+löschen nullable Datumsfelder. Bestellentwürfe versenden keine externen Bestellungen.
+Empfangene, bestätigte, archivierte und Amazon-PunchOut-Datensätze bleiben für
+Entwurfsänderungen gesperrt. Änderung, Audit, Aktivität und dauerhaftes Ergebnis
+werden atomar gespeichert. Alte erfolgreiche Geschäftsbelege bleiben mit dem
+ursprünglichen nativen Payload abrufbar; neue öffentliche Legacy-MCP-Entwürfe
+verlangen eine neue Vorbereitung. Falls eine alte Lieferantensuche nach Umbenennung
+nicht mehr auflösbar ist, die originale Lieferanten-ID aus dem Beleg verwenden.
+
+Keine neue Migration; Native 011 / Suite 040 und sämtliche vorhandenen Guards
+bleiben erforderlich. Der Katalog enthält weiterhin 383 Werkzeuge. Weitere
+Akzeptanzpunkte der Issues bleiben offen.
+
 ## Vollständige Bedarfsentwürfe — Procurement 1.0.71 / MCP 1.5.46
 
 Die sechs bestehenden Bedarfswerkzeuge für Create, Update und Submit delegieren
