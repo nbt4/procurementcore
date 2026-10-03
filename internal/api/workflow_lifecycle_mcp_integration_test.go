@@ -283,13 +283,29 @@ func TestProcurementWorkflowOwnerRetainedLifecycleAndRevision(t *testing.T) {
 	if out["status"] != "returned" {
 		t.Fatal("return failed", status, raw)
 	}
-	update := map[string]any{"title": "Revised retained demand", "costCenter": "NEW", "justification": "Revision reviewed", "lines": []any{map[string]any{"productId": product.ID, "description": "Revised line", "quantity": 2, "unit": "m", "estimatedPriceCents": 100}}, "expectedUpdatedAt": out["updatedAt"]}
-	status, out, raw = call(2, "cores:procurement:update", "workflow-revision-update", "PUT", fmt.Sprintf("/requisitions/%d", requisition.ID), update)
-	if status != 200 || out["status"] != "draft" {
+	update := map[string]any{"id": requisition.ID, "title": "Revised retained demand", "cost_center": "NEW", "justification": "Revision reviewed", "lines": []any{map[string]any{"product_id": product.ID, "description": "Revised line", "quantity": 2, "unit": "m", "estimated_price_cents": 100}}, "preview": true}
+	status, p, raw = call(2, "cores:procurement:update", "", "POST", "/mcp/requisitions/update", update)
+	if status != 200 || p["ready_to_execute"] != true {
+		t.Fatal("revision preview", status, raw)
+	}
+	for k, v := range final(requisition.ID, p) {
+		update[k] = v
+	}
+	delete(update, "preview")
+	status, out, raw = call(2, "cores:procurement:update", "workflow-revision-update", "POST", "/mcp/requisitions/update", update)
+	if status != 200 || out["requisition"].(map[string]any)["status"] != "draft" {
 		t.Fatal("returned demand not editable", status, raw)
 	}
-	status, out, raw = call(2, "cores:procurement:submit", "workflow-revision-submit", "POST", fmt.Sprintf("/requisitions/%d/submit", requisition.ID), map[string]any{"expectedUpdatedAt": out["updatedAt"]})
-	if status != 200 || out["status"] != "submitted" || out["approvedBy"] != nil || out["decidedAt"] != nil || out["decisionNote"] != "" {
+	status, p, raw = call(2, "cores:procurement:submit", "", "POST", "/mcp/requisitions/submit", map[string]any{"id": requisition.ID, "preview": true})
+	if status != 200 || p["ready_to_execute"] != true {
+		t.Fatal("submission preview", status, raw)
+	}
+	status, out, raw = call(2, "cores:procurement:submit", "workflow-revision-submit", "POST", "/mcp/requisitions/submit", final(requisition.ID, p))
+	if status != 200 {
+		t.Fatal("resubmission", status, raw)
+	}
+	out = out["requisition"].(map[string]any)
+	if out["status"] != "submitted" || out["approvedBy"] != nil || out["decidedAt"] != nil || out["decisionNote"] != "" {
 		t.Fatal("resubmission kept stale approval", status, raw)
 	}
 	// Exact version permits a single concurrent archive only.

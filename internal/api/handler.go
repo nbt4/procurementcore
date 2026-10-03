@@ -48,6 +48,7 @@ func (h *Handler) Routes() http.Handler {
 	r.With(auth.RequireAdmin).Post("/mcp/orders/receive", h.goodsReceiptMCP)
 	r.Post("/mcp/workflows/{entity}/{operation}", h.workflowLifecycleMCP)
 	r.With(auth.RequireAdmin).Post("/mcp/approvals/{entity}", h.approvalMCP)
+	r.Post("/mcp/requisitions/{operation}", h.requisitionDraftMCP)
 	r.Get("/me", h.me)
 	r.Get("/dashboard", h.dashboard)
 	r.Get("/categories", h.listCategories)
@@ -81,11 +82,11 @@ func (h *Handler) Routes() http.Handler {
 	r.Get("/amazon/punchout/config", h.amazonConfig)
 	r.Post("/amazon/punchout/start", h.startAmazonPunchout)
 	r.Get("/requisitions/{id}", h.getRequisition)
-	r.Post("/requisitions", h.createRequisition)
+	r.With(h.onlyLegacyRequisitionDraftReplay("create")).Post("/requisitions", h.createRequisition)
 	r.Post("/requisitions/offer-preview", h.previewRequisitionOffer)
 	r.With(auth.RequireAdmin).Post("/requisitions/from-offer", h.createRequisitionFromOffer)
-	r.Put("/requisitions/{id}", h.updateRequisition)
-	r.Post("/requisitions/{id}/submit", h.submitRequisition)
+	r.With(h.onlyLegacyRequisitionDraftReplay("update")).Put("/requisitions/{id}", h.updateRequisition)
+	r.With(h.onlyLegacyRequisitionDraftReplay("submit")).Post("/requisitions/{id}/submit", h.submitRequisition)
 	r.With(auth.RequireAdmin, h.onlyLegacyApprovalReplay("requisitions")).Post("/requisitions/{id}/decision", h.decideRequisition)
 	r.With(auth.RequireAdmin).Post("/requisitions/{id}/order", h.convertRequisition)
 	r.Get("/orders", h.listOrders)
@@ -1520,10 +1521,7 @@ func (h *Handler) updateRequisition(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user := auth.CurrentUser(r)
-	var input struct {
-		models.Requisition
-		ExpectedUpdatedAt *time.Time `json:"expectedUpdatedAt"`
-	}
+	var input requisitionUpdateInput
 	if !decode(w, r, &input) {
 		return
 	}
@@ -1593,9 +1591,7 @@ func (h *Handler) submitRequisition(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user := auth.CurrentUser(r)
-	var input struct {
-		ExpectedUpdatedAt *time.Time `json:"expectedUpdatedAt"`
-	}
+	var input requisitionSubmitInput
 	if !decode(w, r, &input) {
 		return
 	}

@@ -1,5 +1,32 @@
 # ProcurementCore
 
+## Vollständige Bedarfsentwürfe — Procurement 1.0.71 / MCP 1.5.46
+
+Die sechs bestehenden Bedarfswerkzeuge für Create, Update und Submit delegieren
+an `/api/v1/mcp/requisitions/{create|update|submit}`. Die geschlossene API prüft
+aktuelle aktive Nutzerrechte vor neuen und gespeicherten Ergebnissen. Änderungen
+und Einreichung verlangen den ursprünglichen Anforderer oder einen aktuellen
+Administrator sowie die signierte passende Aktion. Eine vollständige Vorschau
+bindet alle Felder, Positionswerte, aktuelle Produkt-/Lieferantenreferenzen,
+Duplikate, exakte Version und `expected_context` an die Bestätigungsphrase.
+`confirm_creation`, `confirm_update` bzw. `confirm_submit` und ein gültiger
+Idempotenzschlüssel geben die geprüfte Ausführung frei. Dry-Run bleibt rein lesend.
+
+Ausgelassene Positionen behalten IDs und native Zusatzfelder. Eine vollständige
+explizite Positionsliste kann vorhandene `line_id` erhalten und neue Positionen
+ergänzen. Rückgabe → Überarbeitung → Einreichung erhält die Entscheidungshistorie
+und löscht bei Einreichung die aktive vorige Entscheidung. Gleichnamige eigene
+Bedarfe werden als Duplikate gezeigt; `allow_duplicate` gilt nur für bewusst
+getrennte Neuanlagen. Änderung, Audit, Aktivität und dauerhafter Erfolgsbeleg
+werden atomar gespeichert. Erfolgreiche alte Geschäftsbelege bleiben mit ihrem
+ursprünglichen Payload abrufbar; neue Aufrufe alter öffentlicher MCP-Pfade müssen
+neu vorbereitet werden. Wiederholungen prüfen erneut die aktuellen Rechte.
+
+Native Migration 011 / Suite 040 sperrt aktive Referenzen für sämtliche
+Schreibwege und schließt das Rennen zwischen Validierung und Katalogarchiv.
+Historische abgeschlossene Datensätze behalten ihre Referenzen. Der Katalog
+enthält weiterhin 383 Tools. Andere Akzeptanzpunkte der Issues bleiben offen.
+
 ## Kontextgebundene Freigaben — Procurement 1.0.70 / MCP 1.5.45
 
 `procurement.requisitions.prepare_decide/decide` und
