@@ -63,5 +63,8 @@ func Open(dsn string) (*gorm.DB, error) {
 	if err := ensureSubmissionReconciliations(db); err != nil {
 		return nil, fmt.Errorf("migrate human supplier verification: %w", err)
 	}
+	if err := ensureAdamHallCheckouts(db); err != nil {
+		return nil, fmt.Errorf("migrate reviewed Adam Hall checkouts: %w", err)
+	}
 	return db, nil
 }

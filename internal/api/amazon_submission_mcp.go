@@ -341,6 +341,10 @@ func (h *Handler) runAmazonSubmission(w http.ResponseWriter, r *http.Request, in
 }
 
 func auditSupplierOutcome(tx *gorm.DB, r *http.Request, before, after orderSubmissionRecord) error {
+	action := "amazon_submission_outcome"
+	if after.Provider == "adam_hall" {
+		action = "adam_hall_submission_outcome"
+	}
 	oldJSON, _ := json.Marshal(before)
 	newJSON, _ := json.Marshal(map[string]any{"origin": func() string {
 		if isMCPMutation(r) {
@@ -348,10 +352,10 @@ func auditSupplierOutcome(tx *gorm.DB, r *http.Request, before, after orderSubmi
 		}
 		return "UI"
 	}(), "submission": after})
-	if err := tx.Exec(`INSERT INTO audit_log(user_id,action,entity_type,entity_id,old_values,new_values,ip_address,user_agent) VALUES(?,'order.amazon_submission_outcome','procurement_order',?,?::jsonb,?::jsonb,?,?)`, after.UserID, fmt.Sprint(after.PurchaseOrderID), string(oldJSON), string(newJSON), requestIP(r), r.UserAgent()).Error; err != nil {
+	if err := tx.Exec(`INSERT INTO audit_log(user_id,action,entity_type,entity_id,old_values,new_values,ip_address,user_agent) VALUES(?,?,'procurement_order',?,?::jsonb,?::jsonb,?,?)`, after.UserID, "order."+action, fmt.Sprint(after.PurchaseOrderID), string(oldJSON), string(newJSON), requestIP(r), r.UserAgent()).Error; err != nil {
 		return err
 	}
-	return tx.Create(&models.Activity{EntityType: "purchase_order", EntityID: uint(after.PurchaseOrderID), Action: "amazon_submission_outcome", UserID: after.UserID, Username: auth.CurrentUser(r).Username, Details: after.Status}).Error
+	return tx.Create(&models.Activity{EntityType: "purchase_order", EntityID: uint(after.PurchaseOrderID), Action: action, UserID: after.UserID, Username: auth.CurrentUser(r).Username, Details: after.Status}).Error
 }
 
 func finalizeAmazonSubmission(tx *gorm.DB, r *http.Request, submission orderSubmissionRecord, receipt *models.IdempotencyRecord) (map[string]any, error) {
@@ -369,13 +373,31 @@ func finalizeAmazonSubmission(tx *gorm.DB, r *http.Request, submission orderSubm
 	}
 	before := order
 	status, action := "sent", "ordered_at_amazon"
+	if submission.Provider == "adam_hall" {
+		action = "ordered_at_adam_hall"
+	}
 	if submission.Status != "accepted" {
 		status, action = "submission_unknown", "amazon_submission_unknown"
+		if submission.Provider == "adam_hall" {
+			action = "adam_hall_submission_unknown"
+		}
 	}
 	if order.Status == "submitting" {
 		updates := map[string]any{"status": status}
 		if status == "sent" && order.OrderDate == nil {
 			updates["order_date"] = time.Now()
+		}
+		if status == "sent" && submission.Provider == "adam_hall" {
+			var outcome struct {
+				SupplierOrderNumber string `json:"supplier_order_number"`
+			}
+			if err := json.Unmarshal(submission.Outcome, &outcome); err != nil {
+				return nil, err
+			}
+			if outcome.SupplierOrderNumber == "" {
+				return nil, errors.New("Saved supplier acknowledgement lacks its order reference")
+			}
+			updates["supplier_order_number"] = outcome.SupplierOrderNumber
 		}
 		if err := tx.Model(&models.PurchaseOrder{}).Where("id=?", order.ID).Updates(updates).Error; err != nil {
 			return nil, err
@@ -388,8 +410,19 @@ func finalizeAmazonSubmission(tx *gorm.DB, r *http.Request, submission orderSubm
 		}
 	}
 	result := map[string]any{"operation_status": status, "purchase_order": order, "submission_id": submission.ID, "supplier_outcome": submission.Status, "effects": map[string]any{"external_order_may_exist": true, "automatic_resubmission": false, "physical_stock_changed": false}}
+	if submission.Provider == "adam_hall" {
+		var reviewed map[string]json.RawMessage
+		if err := json.Unmarshal(submission.ReviewedPayload, &reviewed); err != nil {
+			return nil, err
+		}
+		result["supplier_cart"] = reviewed["supplier_cart"]
+		result["checkout_id"] = reviewed["checkout_id"]
+	}
 	if submission.Status != "accepted" {
 		result["message"] = "Supplier outcome is uncertain. Reconcile in Amazon Business; never resend automatically."
+		if submission.Provider == "adam_hall" {
+			result["message"] = "Supplier outcome is uncertain. Check the Adam Hall account and original order; never resend automatically."
+		}
 	}
 	if err := completeIdempotentMutation(tx, receipt, 200, result); err != nil {
 		return nil, err

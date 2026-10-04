@@ -79,7 +79,11 @@ func TestAmazonSubmissionDurablePhasesNoDuplicateAndCurrentRights(t *testing.T) 
 		if err != nil {
 			t.Fatal(err)
 		}
-		signed, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"uid": uid, "username": "fixture", "is_admin": true, "mcp_scope": scope, "exp": time.Now().Add(time.Minute).Unix()}).SignedString(commonjwt.JWTSecret())
+		delegatedScope := scope
+		if scope == "UI" {
+			delegatedScope = ""
+		}
+		signed, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"uid": uid, "username": "fixture", "is_admin": true, "mcp_scope": delegatedScope, "exp": time.Now().Add(time.Minute).Unix()}).SignedString(commonjwt.JWTSecret())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -334,6 +338,10 @@ func TestAmazonSubmissionDurablePhasesNoDuplicateAndCurrentRights(t *testing.T) 
 	}
 	if status, _ := callHandler(handler, 1, "cores:procurement:send", "public-bypass", "POST", fmt.Sprintf("/orders/%d/amazon/submit", order.ID), map[string]any{}); status != 428 {
 		t.Fatal("old MCP shortcut", status)
+	}
+	headerless := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { r.Header.Del("X-Cores-Origin"); handler.ServeHTTP(w, r) })
+	if status, _ := callHandler(headerless, 1, "cores:procurement:send", "headerless-bypass", "POST", fmt.Sprintf("/orders/%d/amazon/submit", order.ID), map[string]any{}); status != 428 {
+		t.Fatal("signed delegation bypassed guided UI guard by omitting origin", status)
 	}
 	t.Run("human verification retains original claim without supplier calls", func(t *testing.T) {
 		reconcile := func(uid uint, scope, key string, in map[string]any) (int, map[string]any) {

@@ -28,13 +28,15 @@ type AdamHallCartLine struct {
 }
 
 type AdamHallCart struct {
-	Lines           []AdamHallCartLine `json:"lines"`
-	TotalCents      int64              `json:"totalCents"`
-	Currency        string             `json:"currency"`
-	Customer        string             `json:"customer"`
-	ShippingAddress string             `json:"shippingAddress"`
-	ShippingMethod  string             `json:"shippingMethod"`
-	PaymentMethod   string             `json:"paymentMethod"`
+	Lines             []AdamHallCartLine `json:"lines"`
+	TotalCents        int64              `json:"totalCents"`
+	Currency          string             `json:"currency"`
+	Customer          string             `json:"customer"`
+	ShippingAddress   string             `json:"shippingAddress"`
+	ShippingMethod    string             `json:"shippingMethod"`
+	PaymentMethod     string             `json:"paymentMethod"`
+	BillingAddress    string             `json:"billingAddress,omitempty"`
+	ReviewFingerprint string             `json:"reviewFingerprint,omitempty"`
 }
 
 type AdamHallOrder struct {
@@ -83,34 +85,45 @@ type adamHallCartPayload struct {
 	} `json:"extensions"`
 }
 
+type adamHallAddressPayload struct {
+	ID         string `json:"id"`
+	Company    string `json:"company"`
+	FirstName  string `json:"firstName"`
+	LastName   string `json:"lastName"`
+	Street     string `json:"street"`
+	Zipcode    string `json:"zipcode"`
+	City       string `json:"city"`
+	Additional string `json:"additionalAddressLine1"`
+	Country    *struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+		ISO  string `json:"iso"`
+	} `json:"country"`
+}
+
 type adamHallContextPayload struct {
 	Customer *struct {
-		FirstName             string `json:"firstName"`
-		LastName              string `json:"lastName"`
-		Email                 string `json:"email"`
-		ActiveShippingAddress *struct {
-			Company    string `json:"company"`
-			FirstName  string `json:"firstName"`
-			LastName   string `json:"lastName"`
-			Street     string `json:"street"`
-			Zipcode    string `json:"zipcode"`
-			City       string `json:"city"`
-			Additional string `json:"additionalAddressLine1"`
-			Country    *struct {
-				Name string `json:"name"`
-			} `json:"country"`
-		} `json:"activeShippingAddress"`
+		ID                    string                  `json:"id"`
+		FirstName             string                  `json:"firstName"`
+		LastName              string                  `json:"lastName"`
+		Email                 string                  `json:"email"`
+		ActiveShippingAddress *adamHallAddressPayload `json:"activeShippingAddress"`
+		ActiveBillingAddress  *adamHallAddressPayload `json:"activeBillingAddress"`
+		DefaultBillingAddress *adamHallAddressPayload `json:"defaultBillingAddress"`
 	} `json:"customer"`
 	Currency *struct {
+		ID      string `json:"id"`
 		ISOCode string `json:"isoCode"`
 	} `json:"currency"`
 	ShippingMethod *struct {
+		ID         string `json:"id"`
 		Name       string `json:"name"`
 		Translated struct {
 			Name string `json:"name"`
 		} `json:"translated"`
 	} `json:"shippingMethod"`
 	PaymentMethod *struct {
+		ID         string `json:"id"`
 		Name       string `json:"name"`
 		Translated struct {
 			Name string `json:"name"`

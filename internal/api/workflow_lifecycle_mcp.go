@@ -20,6 +20,25 @@ import (
 	"gorm.io/gorm"
 )
 
+// A signed MCP token remains delegated even when a caller omits the optional
+// origin header; it cannot use native UI routes to evade guided action scopes.
+func hasSignedMCPDelegation(r *http.Request) bool {
+	raw := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if cookie, err := r.Cookie("cores_token"); err == nil {
+		raw = cookie.Value
+	}
+	if raw == "" {
+		return false
+	}
+	var claims struct {
+		UID   uint   `json:"uid"`
+		Scope string `json:"mcp_scope"`
+		jwt.RegisteredClaims
+	}
+	token, err := jwt.ParseWithClaims(raw, &claims, func(*jwt.Token) (any, error) { return commonjwt.JWTSecret(), nil }, jwt.WithValidMethods([]string{"HS256"}), jwt.WithExpirationRequired())
+	return err == nil && token.Valid && claims.UID == auth.CurrentUser(r).ID && strings.TrimSpace(claims.Scope) != ""
+}
+
 func signedProcurementUserDelegation(r *http.Request, scope string) bool {
 	user := auth.CurrentUser(r)
 	if user.ID == 0 || !isMCPMutation(r) {

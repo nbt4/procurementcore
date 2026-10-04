@@ -1,5 +1,57 @@
 # ProcurementCore
 
+## Adam-Hall-Warenkorb und Bestellung getrennt bestätigen — Procurement 1.0.76 / MCP 1.5.51
+
+Vier benannte Werkzeuge ergänzen den Lieferantenablauf:
+`procurement.orders.prepare_build_adam_hall_cart/build_adam_hall_cart` und
+`procurement.orders.prepare_send_adam_hall/send_adam_hall`.
+Der Katalog umfasst 393 Werkzeuge: 105 Abfragen, 144 Vorschauen, 144 Ausführungen.
+Nur aktuelle aktive Administratoren mit explizitem `cores:procurement:send`
+dürfen Vorschau, Ausführung und Wiederholung nutzen; allgemeines Schreiben,
+Create, Update und Approve ersetzen dieses Recht nicht.
+
+Die erste reine Vorschau bindet vollständigen lokalen Entwurf, aktive Referenzen,
+Lieferanten-Artikelnummern und ganze Mengen an exakte Version, Kontext und
+`BUILD ADAM HALL CART ORDER ...`-Phrase. Erst `confirm_cart` plus unverändertem
+Idempotenzschlüssel bereitet den externen Warenkorb vor. Fremde vorhandene
+Positionen werden niemals gelöscht; ein abweichender Warenkorb blockiert den
+Ablauf. Diese Aktion bestellt nichts und verändert keinen Lagerbestand.
+
+Die zweite reine Vorschau liest ausschließlich den gespeicherten Lieferanten-
+Warenkorb. Vollständige Positionen, EUR-Preise/Gesamtbetrag, Geschäfts-Liefer-
+und Rechnungsadresse, Zahlungs-/Versandart und vorgeschlagene lokale Preise
+müssen sichtbar geprüft werden. Der gespeicherte Checkout gilt höchstens
+15 Minuten und verliert bei lokalen Artikel-/Entwurfs-/Kontoänderungen seine
+Gültigkeit. Exakte Checkout-ID, Version, Kontext, `SEND ADAM HALL ORDER ... EUR
+... CHECKOUT ...`-Phrase, `confirm_send` und eine eigene Idempotenzkennung
+bestätigen die kostenpflichtige Bestellung. Vor dem einzigen Bestellaufruf wird
+derselbe private Lieferanten-Warenkorb erneut vollständig geprüft; geänderte
+Preise, Adressen oder Methoden blockieren den Versand. Er wird nicht neu gebaut.
+
+Native `014` / Root `043` bewahren Warenkorbauftrag und geprüfte Antwort mit
+unveränderlichen Identitäten und Audit. Der private Lieferanten-Kontext wird
+AES-GCM-verschlüsselt gespeichert, an Checkout/Auftrag/Nutzer/Kontext gebunden
+und niemals ausgegeben oder auditiert. Schlüsselgrundlage ist das gemeinsame
+JWT-Secret; Schlüsselwechsel macht bestehende private Checkouts unlesbar und
+erfordert eine neue ausdrücklich bestätigte Warenkorbvorbereitung.
+
+Der dauerhafte bezahlte Übermittlungsauftrag, geprüfte lokale Preise mit
+unveränderten Positions-IDs, Audit und Wiederholungsbeleg werden vor dem externen
+Aufruf atomar gespeichert. Lieferantenantwort und Abschluss werden in eigenen
+vollständig auditierten Phasen gesichert. Wiederholung derselben ursprünglichen
+Anfrage liest/finalisiert ausschließlich gespeicherte Ergebnisse. Ungewisse
+Antworten oder verlorene Ergebnisspeicherung blockieren jede erneute Übermittlung;
+die bestehende menschliche Klärung entscheidet den weiteren Geschäftsstatus.
+Es gibt keine automatische Ersatzbestellung oder Rücksetzung.
+
+Auch der native Bestelldialog liest beim Öffnen nur eine lokale Vorschau und
+verlangt beide Bestätigungen getrennt. Er zeigt Preise und Geschäftsadressen
+vor dem bezahlten Schritt, übernimmt die geprüften Preise und behält nach
+Verbindungsfehlern exakt dieselbe Anfragekennung. Bestehende unbestätigte native
+POSTs erzeugen nur eine Vorschau; signierte MCP-Delegationen können native UI-
+Endpunkte auch durch Weglassen des Origin-Headers nicht umgehen.
+Die übrigen Abnahmepunkte von #4/#5 bleiben offen.
+
 ## Ungewisse Übermittlungen menschlich klären — Procurement 1.0.75 / MCP 1.5.50
 
 `procurement.orders.prepare_reconcile_submission/reconcile_submission` dokumentiert

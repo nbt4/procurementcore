@@ -72,3 +72,28 @@ Fehler stehen direkt am Formular und sind ohne Farberkennung lesbar.
 ## Implementierung
 
 `web/src/cores-theme.css` und `web/src/lib/cores-design.ts` sind generierte Dateien. Änderungen erfolgen in den kanonischen Quellen des Umbrella-Repositories und werden dort synchronisiert und geprüft. Lokale Komponenten verwenden die `suite-*`-Primitives und dürfen sie nur fachlich ergänzen.
+
+## Adam-Hall-Bestätigung
+
+Der Dialog verwendet ausschließlich bestehende Modal-/Formular-/Button- und
+`suite-table-wrap`-Primitives. Öffnen lädt die lokale Vorschau ohne Lieferanten-
+Schreibzugriff. Der erste Schritt zeigt Artikelnummern/Mengen und eine eigene
+Warenkorb-Bestätigung; der zweite zeigt vollständige Lieferantenpositionen,
+EUR-Summe, Geschäfts-Liefer-/Rechnungsadresse und Zahlungs-/Versandart mit einer
+gesonderten verbindlichen Bestellbestätigung. Geänderte oder abgelaufene
+Vorschauen blockieren den Versand. Fehler, ausstehende Ergebnisse und
+Verbindungswiederholung behalten eine lesbare Meldung; kein automatischer
+Neuaufbau oder Versand. Deutsch/Englisch und Geldformat folgen der gemeinsamen
+Suite-Sprachwahl. Fokus bleibt im Dialog, Escape/Schließen sind während einer
+Übermittlung gesperrt, Checkboxen sind beschriftet und Tabellen mobil scrollbar.
+
+Hilfetexte und Tabellen verwenden die vorhandenen Suite-Schrift-/Abstands- und
+Sekundärtext-Tokens für ausreichenden Kontrast. Originale Lieferantenbezeichnungen
+und Positionen sind von der allgemeinen UI-Übersetzung ausgenommen; Sprachwahl
+übersetzt ausschließlich Bedienelemente und formatiert Geldwerte.
+
+Abnahme-Screenshots: [Warenkorb mobil](screenshots/adam-hall-cart-de-light-390.png),
+[Bestellprüfung mobil](screenshots/adam-hall-paid-de-light-390.png),
+[Warenkorb Desktop](screenshots/adam-hall-cart-en-dark-1280.png),
+[Bestellprüfung Desktop](screenshots/adam-hall-paid-en-dark-1280.png).
+Die Aufnahmen enthalten ausschließlich isolierte Testdaten.

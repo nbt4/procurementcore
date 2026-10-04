@@ -248,6 +248,7 @@ export type AdamHallCart = {
   currency: string;
   customer: string;
   shippingAddress: string;
+  billingAddress?: string;
   shippingMethod: string;
   paymentMethod: string;
 };

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/csv"
@@ -31,14 +32,22 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+type procurementProductFetcher interface {
+	Scrape(context.Context, string) (scraper.ProductPreview, error)
+	AdamHallConfigured() bool
+	AdamHallAccountFingerprint() string
+	PrepareAdamHallReviewedCheckout(context.Context, []scraper.AdamHallItem) (scraper.AdamHallReviewedCheckout, error)
+	SubmitReviewedAdamHallCheckout(context.Context, string, []scraper.AdamHallItem, scraper.AdamHallCart, string) (scraper.AdamHallOrder, error)
+}
+
 type Handler struct {
 	db      *gorm.DB
-	scraper *scraper.Fetcher
+	scraper procurementProductFetcher
 	jev     *jev.Client
 	amazon  *amazon.Client
 }
 
-func NewHandler(db *gorm.DB, productScraper *scraper.Fetcher, amazonClient *amazon.Client) *Handler {
+func NewHandler(db *gorm.DB, productScraper procurementProductFetcher, amazonClient *amazon.Client) *Handler {
 	return &Handler{db: db, scraper: productScraper, jev: jev.FromEnv(), amazon: amazonClient}
 }
 
@@ -53,6 +62,7 @@ func (h *Handler) Routes() http.Handler {
 	r.With(auth.RequireAdmin).Post("/mcp/requisition-orders", h.requisitionOrderMCP)
 	r.With(auth.RequireAdmin).Post("/mcp/orders/send-amazon", h.amazonSubmissionMCP)
 	r.With(auth.RequireAdmin).Post("/mcp/orders/reconcile-submission", h.submissionReconciliationMCP)
+	r.With(auth.RequireAdmin).Post("/mcp/orders/adam-hall/{operation}", h.adamHallCheckoutMCP)
 	r.Get("/me", h.me)
 	r.Get("/dashboard", h.dashboard)
 	r.Get("/categories", h.listCategories)
@@ -101,6 +111,8 @@ func (h *Handler) Routes() http.Handler {
 	r.With(auth.RequireAdmin, h.onlyLegacyOrderDraftReplay("update")).Put("/orders/{id}/draft", h.updateOrderDraft)
 	r.With(auth.RequireAdmin).Post("/orders/{id}/adam-hall/cart", h.previewAdamHallOrder)
 	r.With(auth.RequireAdmin).Post("/orders/{id}/adam-hall/order", h.placeAdamHallOrder)
+	r.With(auth.RequireAdmin).Get("/orders/{id}/adam-hall/review", h.reviewAdamHallOrder)
+	r.With(auth.RequireAdmin).Get("/orders/{id}/adam-hall/send-review", h.reviewAdamHallSubmission)
 	r.With(auth.RequireAdmin).Post("/orders/{id}/amazon/submit", h.submitAmazonOrder)
 	r.With(auth.RequireAdmin).Post("/orders/{id}/receipt", h.receiveOrder)
 	r.Get("/activity", h.listActivity)
@@ -2069,141 +2081,36 @@ func (h *Handler) updateOrder(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, row)
 }
 
-type adamHallOrderData struct {
-	Order                 models.PurchaseOrder
-	Items                 []scraper.AdamHallItem
-	ProductNumberByLineID map[uint]string
-}
-
 func (h *Handler) previewAdamHallOrder(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
-	}
-	data, message := h.adamHallOrderData(id)
-	if message != "" {
-		badRequest(w, message)
-		return
-	}
-	cart, err := h.scraper.AdamHallCart(r.Context(), data.Items)
-	if err != nil {
-		badRequest(w, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, cart)
+	h.adamHallNativeAction(w, r, "cart", false)
 }
-
 func (h *Handler) placeAdamHallOrder(w http.ResponseWriter, r *http.Request) {
+	h.adamHallNativeAction(w, r, "send", false)
+}
+func (h *Handler) reviewAdamHallOrder(w http.ResponseWriter, r *http.Request) {
+	h.adamHallNativeAction(w, r, "cart", true)
+}
+func (h *Handler) reviewAdamHallSubmission(w http.ResponseWriter, r *http.Request) {
+	h.adamHallNativeAction(w, r, "send", true)
+}
+func (h *Handler) adamHallNativeAction(w http.ResponseWriter, r *http.Request, operation string, preview bool) {
 	id, ok := pathID(w, r)
 	if !ok {
 		return
 	}
-	data, message := h.adamHallOrderData(id)
-	if message != "" {
-		badRequest(w, message)
+	if isMCPMutation(r) {
+		writeJSON(w, 428, map[string]string{"error": "Prepare the closed reviewed Adam Hall workflow before using MCP"})
 		return
 	}
-	claimed := h.db.Model(&models.PurchaseOrder{}).
-		Where("id = ? AND status = ? AND COALESCE(supplier_order_number, '') = ''", id, "draft").
-		Update("status", "submitting")
-	if claimed.Error != nil {
-		serverError(w, claimed.Error)
-		return
-	}
-	if claimed.RowsAffected != 1 {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "Bestellung wurde bereits übertragen oder wird gerade übertragen"})
-		return
-	}
-
-	comment := strings.TrimSpace(strings.Join([]string{data.Order.Number, data.Order.Notes}, " · "))
-	remoteOrder, err := h.scraper.PlaceAdamHallOrder(r.Context(), data.Items, comment)
-	if err != nil {
-		status := "draft"
-		if scraper.IsAdamHallSubmissionUncertain(err) {
-			status = "submission_unknown"
-		}
-		_ = h.db.Model(&models.PurchaseOrder{}).Where("id = ? AND status = ?", id, "submitting").Update("status", status).Error
-		h.activity(r, "purchase_order", id, "adam_hall_order_failed", data.Order.Number)
-		badRequest(w, err.Error())
-		return
-	}
-
-	unitPriceByProductNumber := make(map[string]int64, len(remoteOrder.Cart.Lines))
-	for _, line := range remoteOrder.Cart.Lines {
-		unitPriceByProductNumber[strings.ToUpper(strings.TrimSpace(line.ProductNumber))] = line.UnitPriceCents
-	}
-	now := time.Now()
-	updates := map[string]any{
-		"status": "sent", "supplier_order_number": remoteOrder.OrderNumber,
-		"order_date": now, "total_cents": remoteOrder.Cart.TotalCents, "currency": remoteOrder.Cart.Currency,
-	}
-	result := h.db.Model(&models.PurchaseOrder{}).Where("id = ? AND status = ?", id, "submitting").Updates(updates)
-	if result.Error != nil || result.RowsAffected != 1 {
-		// Once Adam Hall accepted an order, preserve its external reference even
-		// if a concurrent local state change happened.
-		fallback := h.db.Model(&models.PurchaseOrder{}).Where("id = ?", id).Updates(updates)
-		if fallback.Error != nil || fallback.RowsAffected != 1 {
-			serverError(w, errors.New("Adam-Hall-Bestellnummer konnte lokal nicht gesichert werden"))
+	input := adamHallCheckoutRequest{ID: int64(id), Preview: true}
+	if !preview {
+		var ok bool
+		input, ok = readAdamHallCheckoutRequest(w, r, id)
+		if !ok {
 			return
 		}
 	}
-	for lineID, productNumber := range data.ProductNumberByLineID {
-		if price, exists := unitPriceByProductNumber[productNumber]; exists {
-			if err := h.db.Model(&models.PurchaseOrderLine{}).Where("id = ? AND purchase_order_id = ?", lineID, id).Update("unit_price_cents", price).Error; err != nil {
-				h.activity(r, "purchase_order", id, "adam_hall_price_sync_failed", remoteOrder.OrderNumber)
-			}
-		}
-	}
-	h.activity(r, "purchase_order", id, "ordered_at_adam_hall", remoteOrder.OrderNumber)
-
-	var updated models.PurchaseOrder
-	if err := h.db.Preload("Supplier").Preload("Lines").Preload("Lines.Product").First(&updated, id).Error; err != nil {
-		serverError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"order": updated, "cart": remoteOrder.Cart})
-}
-
-func (h *Handler) adamHallOrderData(id uint) (adamHallOrderData, string) {
-	var order models.PurchaseOrder
-	if err := h.db.Preload("Supplier").Preload("Lines").Preload("Lines.Product").First(&order, id).Error; err != nil {
-		return adamHallOrderData{}, "Bestellung wurde nicht gefunden"
-	}
-	if order.Status != "draft" {
-		return adamHallOrderData{}, "Nur Bestellungen im Entwurf können an Adam Hall übertragen werden"
-	}
-	if strings.TrimSpace(order.SupplierOrderNumber) != "" {
-		return adamHallOrderData{}, "Bestellung besitzt bereits eine Lieferanten-Bestellnummer"
-	}
-	if order.Supplier == nil || !isAdamHallSupplier(*order.Supplier) {
-		return adamHallOrderData{}, "Der gewählte Lieferant ist kein Adam-Hall-Konto"
-	}
-	items := make([]scraper.AdamHallItem, 0, len(order.Lines))
-	productNumberByLineID := make(map[uint]string, len(order.Lines))
-	for _, line := range order.Lines {
-		if line.ProductID == nil || line.Product == nil {
-			return adamHallOrderData{}, fmt.Sprintf("Position %q ist keinem Katalogartikel zugeordnet", line.Description)
-		}
-		productNumber := strings.TrimSpace(line.Product.SKU)
-		var offer models.Offer
-		if err := h.db.Where("product_id = ? AND supplier_id = ? AND active = ?", *line.ProductID, order.SupplierID, true).
-			Order("price_cents").First(&offer).Error; err == nil && strings.TrimSpace(offer.SupplierSKU) != "" {
-			productNumber = strings.TrimSpace(offer.SupplierSKU)
-		}
-		if productNumber == "" {
-			return adamHallOrderData{}, fmt.Sprintf("Position %q besitzt keine Adam-Hall-Artikelnummer", line.Description)
-		}
-		if line.Quantity <= 0 || math.Trunc(line.Quantity) != line.Quantity {
-			return adamHallOrderData{}, fmt.Sprintf("Position %q benötigt für Adam Hall eine ganzzahlige Menge", line.Description)
-		}
-		normalized := strings.ToUpper(productNumber)
-		items = append(items, scraper.AdamHallItem{ProductNumber: normalized, Quantity: int(line.Quantity)})
-		productNumberByLineID[line.ID] = normalized
-	}
-	if len(items) == 0 {
-		return adamHallOrderData{}, "Bestellung enthält keine Positionen"
-	}
-	return adamHallOrderData{Order: order, Items: items, ProductNumberByLineID: productNumberByLineID}, ""
+	h.runAdamHallCheckout(w, r, operation, input, true)
 }
 
 func isAdamHallSupplier(supplier models.Supplier) bool {
@@ -2228,7 +2135,7 @@ type receiptFlowError struct {
 func (err *receiptFlowError) Error() string { return err.message }
 
 func isMCPMutation(r *http.Request) bool {
-	return strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Cores-Origin")), "MCP/AI")
+	return strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Cores-Origin")), "MCP/AI") || hasSignedMCPDelegation(r)
 }
 
 func requestIP(r *http.Request) string {
@@ -2274,6 +2181,12 @@ func beginIdempotentMutation(tx *gorm.DB, r *http.Request, operation string, inp
 	if !isMCPMutation(r) {
 		return nil, nil, nil
 	}
+	return beginRequiredOwnerMutation(tx, r, operation, input)
+}
+
+// Supplier checkout requires durable identity for native UI requests as well.
+// Keeping this separate preserves the actual UI/MCP audit origin.
+func beginRequiredOwnerMutation(tx *gorm.DB, r *http.Request, operation string, input any) (*models.IdempotencyRecord, json.RawMessage, error) {
 	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
 	if !validIdempotencyKey.MatchString(key) {
 		return nil, nil, &receiptFlowError{status: http.StatusPreconditionRequired, code: "idempotency_key_required", message: "Ein gültiger Idempotency-Key ist für MCP/KI-Änderungen erforderlich"}
