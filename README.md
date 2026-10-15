@@ -1,5 +1,16 @@
 # ProcurementCore
 
+## Finanzrechte für Einkaufs-Schreibabläufe — MCP 1.5.65 / Procurement 1.0.77
+
+Angebots-, Bedarfs- und Bestellvorschauen, Änderungen und gespeicherte Antworten
+verlangen zusätzlich ausdrücklich `cores:procurement:financial`. Dasselbe gilt
+für Produktanlage mit Angebot oder URL-Analyse. Reine Stammdaten bleiben
+finanzfrei. Die Owner-API prüft die signierte Nutzer-/Aktions-/Finanzfreigabe
+vor Belegen und schützt auch native Umgehungswege. Vorhandene Tokens werden
+nicht erweitert; zusätzliche Rechte in OAuth freigeben und erneut vorbereiten.
+
+[Vertrag und Rollout](docs/PROCUREMENT_FINANCIAL_WRITES.md).
+
 ## Adam-Hall-Warenkorb und Bestellung getrennt bestätigen — Procurement 1.0.76 / MCP 1.5.51
 
 Vier benannte Werkzeuge ergänzen den Lieferantenablauf:

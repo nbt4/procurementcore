@@ -23,38 +23,17 @@ import (
 // A signed MCP token remains delegated even when a caller omits the optional
 // origin header; it cannot use native UI routes to evade guided action scopes.
 func hasSignedMCPDelegation(r *http.Request) bool {
-	raw := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if cookie, err := r.Cookie("cores_token"); err == nil {
-		raw = cookie.Value
-	}
-	if raw == "" {
-		return false
-	}
-	var claims struct {
-		UID   uint   `json:"uid"`
-		Scope string `json:"mcp_scope"`
-		jwt.RegisteredClaims
-	}
-	token, err := jwt.ParseWithClaims(raw, &claims, func(*jwt.Token) (any, error) { return commonjwt.JWTSecret(), nil }, jwt.WithValidMethods([]string{"HS256"}), jwt.WithExpirationRequired())
-	return err == nil && token.Valid && claims.UID == auth.CurrentUser(r).ID && strings.TrimSpace(claims.Scope) != ""
+	// Authentication already selected and validated this exact token. Classify
+	// delegation independently of stricter MCP expiry/algorithm requirements so
+	// a malformed delegation can never fall back to native UI authorization.
+	claims := &procurementDelegationClaims{}
+	token, err := jwt.ParseWithClaims(auth.SessionToken(r), claims, func(*jwt.Token) (any, error) { return commonjwt.JWTSecret(), nil }, jwt.WithValidMethods([]string{"HS256", "HS384", "HS512"}), jwt.WithoutClaimsValidation())
+	return err == nil && token.Valid && claims.UID != 0 && claims.UID == auth.CurrentUser(r).ID && len(claims.Scope) != 0
 }
 
 func signedProcurementUserDelegation(r *http.Request, scope string) bool {
-	user := auth.CurrentUser(r)
-	if user.ID == 0 || !isMCPMutation(r) {
-		return false
-	}
-	var claims struct {
-		UID   uint   `json:"uid"`
-		Scope string `json:"mcp_scope"`
-		jwt.RegisteredClaims
-	}
-	raw := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if cookie, err := r.Cookie("cores_token"); err == nil {
-		raw = cookie.Value
-	}
-	token, err := jwt.ParseWithClaims(raw, &claims, func(*jwt.Token) (any, error) { return commonjwt.JWTSecret(), nil }, jwt.WithValidMethods([]string{"HS256"}), jwt.WithExpirationRequired())
-	return err == nil && token.Valid && claims.UID == user.ID && claims.Scope == scope
+	claims, valid := procurementDelegation(r)
+	return valid && claims.actionScope() == scope && claims.financialGranted()
 }
 
 func (h *Handler) workflowLifecycleMCP(w http.ResponseWriter, r *http.Request) {

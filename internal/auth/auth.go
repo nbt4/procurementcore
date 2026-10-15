@@ -21,13 +21,7 @@ const userKey contextKey = "procurement-user"
 
 func Middleware(lookup commonjwt.UserLookup, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token := ""
-		if cookie, err := r.Cookie("cores_token"); err == nil {
-			token = cookie.Value
-		}
-		if token == "" && strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
-			token = strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-		}
+		token := SessionToken(r)
 		claims, ok := commonjwt.ValidateSession(r.Context(), token, commonjwt.JWTSecret(), lookup)
 		if !ok {
 			w.Header().Set("Content-Type", "application/json")
@@ -55,4 +49,16 @@ func RequireAdmin(next http.Handler) http.Handler {
 func CurrentUser(r *http.Request) User {
 	user, _ := r.Context().Value(userKey).(User)
 	return user
+}
+
+// SessionToken is shared by authentication and delegated authorization. An empty
+// cookie must use the same Bearer fallback in both paths.
+func SessionToken(r *http.Request) string {
+	if cookie, err := r.Cookie("cores_token"); err == nil && cookie.Value != "" {
+		return cookie.Value
+	}
+	if strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
+		return strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	}
+	return ""
 }

@@ -81,7 +81,7 @@ func TestOrderDraftOwnerContextIdentityRightsAtomicReplay(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		signed, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"uid": uid, "username": "fixture", "is_admin": true, "mcp_scope": scope, "exp": time.Now().Add(time.Minute).Unix()}).SignedString(commonjwt.JWTSecret())
+		signed, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"uid": uid, "username": "fixture", "is_admin": true, "mcp_procurement_financial": true, "mcp_scope": scope, "exp": time.Now().Add(time.Minute).Unix()}).SignedString(commonjwt.JWTSecret())
 		if err != nil {
 			t.Fatal(err)
 		}

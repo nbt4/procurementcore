@@ -83,7 +83,12 @@ func TestAdamHallClosedCheckoutDurablePhasesAndCurrentRights(t *testing.T) {
 		if scope == "UI" {
 			delegatedScope = ""
 		}
-		signed, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"uid": uid, "username": "fixture", "is_admin": true, "mcp_scope": delegatedScope, "exp": time.Now().Add(time.Minute).Unix()}).SignedString(commonjwt.JWTSecret())
+		claims := jwt.MapClaims{"uid": uid, "username": "fixture", "is_admin": true, "mcp_procurement_financial": true, "mcp_scope": delegatedScope, "exp": time.Now().Add(time.Minute).Unix()}
+		if delegatedScope == "" {
+			delete(claims, "mcp_scope")
+			delete(claims, "mcp_procurement_financial")
+		}
+		signed, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(commonjwt.JWTSecret())
 		if err != nil {
 			t.Fatal(err)
 		}

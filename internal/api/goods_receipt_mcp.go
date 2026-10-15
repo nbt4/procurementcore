@@ -15,8 +15,6 @@ import (
 	"procurementcore/internal/auth"
 	"procurementcore/internal/models"
 
-	"github.com/golang-jwt/jwt/v5"
-	commonjwt "github.com/nbt4/cores-common/pkg/jwt"
 	"gorm.io/gorm"
 )
 
@@ -36,21 +34,7 @@ type goodsReceiptMCPRequest struct {
 }
 
 func signedProcurementDelegation(r *http.Request, scope string) bool {
-	user := auth.CurrentUser(r)
-	if user.ID == 0 || !user.IsAdmin || !isMCPMutation(r) {
-		return false
-	}
-	var claims struct {
-		UID   uint   `json:"uid"`
-		Scope string `json:"mcp_scope"`
-		jwt.RegisteredClaims
-	}
-	raw := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if cookie, err := r.Cookie("cores_token"); err == nil {
-		raw = cookie.Value
-	}
-	token, err := jwt.ParseWithClaims(raw, &claims, func(*jwt.Token) (any, error) { return commonjwt.JWTSecret(), nil }, jwt.WithValidMethods([]string{"HS256"}), jwt.WithExpirationRequired())
-	return err == nil && token.Valid && claims.UID == user.ID && claims.Scope == scope
+	return auth.CurrentUser(r).IsAdmin && signedProcurementUserDelegation(r, scope)
 }
 
 func receiptNativeInput(input goodsReceiptMCPRequest) (goodsReceiptInput, error) {
