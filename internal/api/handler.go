@@ -54,17 +54,17 @@ func NewHandler(db *gorm.DB, productScraper procurementProductFetcher, amazonCli
 func (h *Handler) Routes() http.Handler {
 	r := chi.NewRouter()
 	r.With(auth.RequireAdmin).Post("/mcp/master-data/{entity}/{operation}", h.masterLifecycle)
-	r.With(auth.RequireAdmin).Post("/mcp/orders/receive", h.goodsReceiptMCP)
-	r.Post("/mcp/workflows/{entity}/{operation}", h.workflowLifecycleMCP)
-	r.With(auth.RequireAdmin).Post("/mcp/approvals/{entity}", h.approvalMCP)
-	r.Post("/mcp/requisitions/{operation}", h.requisitionDraftMCP)
-	r.With(auth.RequireAdmin).Post("/mcp/order-drafts/{operation}", h.orderDraftMCP)
-	r.With(auth.RequireAdmin).Post("/mcp/requisition-orders", h.requisitionOrderMCP)
-	r.With(auth.RequireAdmin).Post("/mcp/orders/send-amazon", h.amazonSubmissionMCP)
-	r.With(auth.RequireAdmin).Post("/mcp/orders/reconcile-submission", h.submissionReconciliationMCP)
-	r.With(auth.RequireAdmin).Post("/mcp/orders/adam-hall/{operation}", h.adamHallCheckoutMCP)
+	r.With(h.requireMCPFinancial, auth.RequireAdmin).Post("/mcp/orders/receive", h.goodsReceiptMCP)
+	r.With(h.requireMCPFinancial).Post("/mcp/workflows/{entity}/{operation}", h.workflowLifecycleMCP)
+	r.With(h.requireMCPFinancial, auth.RequireAdmin).Post("/mcp/approvals/{entity}", h.approvalMCP)
+	r.With(h.requireMCPFinancial).Post("/mcp/requisitions/{operation}", h.requisitionDraftMCP)
+	r.With(h.requireMCPFinancial, auth.RequireAdmin).Post("/mcp/order-drafts/{operation}", h.orderDraftMCP)
+	r.With(h.requireMCPFinancial, auth.RequireAdmin).Post("/mcp/requisition-orders", h.requisitionOrderMCP)
+	r.With(h.requireMCPFinancial, auth.RequireAdmin).Post("/mcp/orders/send-amazon", h.amazonSubmissionMCP)
+	r.With(h.requireMCPFinancial, auth.RequireAdmin).Post("/mcp/orders/reconcile-submission", h.submissionReconciliationMCP)
+	r.With(h.requireMCPFinancial, auth.RequireAdmin).Post("/mcp/orders/adam-hall/{operation}", h.adamHallCheckoutMCP)
 	r.Get("/me", h.me)
-	r.Get("/dashboard", h.dashboard)
+	r.With(h.requireMCPFinancial).Get("/dashboard", h.dashboard)
 	r.Get("/categories", h.listCategories)
 	r.With(auth.RequireAdmin).Post("/categories", h.createCategory)
 	r.With(auth.RequireAdmin).Put("/categories/{id}", h.updateCategory)
@@ -73,9 +73,9 @@ func (h *Handler) Routes() http.Handler {
 	r.With(auth.RequireAdmin).Post("/suppliers", h.createSupplier)
 	r.With(auth.RequireAdmin).Put("/suppliers/{id}", h.updateSupplier)
 	r.With(auth.RequireAdmin).Delete("/suppliers/{id}", h.deleteSupplier)
-	r.Get("/products", h.listProducts)
-	r.With(auth.RequireAdmin).Post("/products/import-preview", h.importProductPreview)
-	r.Get("/products/{id}", h.getProduct)
+	r.With(h.requireMCPFinancial).Get("/products", h.listProducts)
+	r.With(h.requireMCPFinancial, auth.RequireAdmin).Post("/products/import-preview", h.importProductPreview)
+	r.With(h.requireMCPFinancial).Get("/products/{id}", h.getProduct)
 	r.With(auth.RequireAdmin).Post("/products", h.createProduct)
 	r.With(auth.RequireAdmin).Put("/products/{id}", h.updateProduct)
 	r.With(auth.RequireAdmin).Delete("/products/{id}", h.deleteProduct)
@@ -83,44 +83,47 @@ func (h *Handler) Routes() http.Handler {
 	r.Get("/products/{id}/warehouse-candidates", h.warehouseCandidates)
 	r.With(auth.RequireAdmin).Post("/products/{id}/warehouse-link", h.linkWarehouseProduct)
 	r.With(auth.RequireAdmin).Delete("/products/{id}/warehouse-link", h.unlinkWarehouseProduct)
-	r.Get("/products/{id}/offers", h.listOffers)
-	r.With(auth.RequireAdmin).Post("/products/{id}/offers", h.createOffer)
-	r.With(auth.RequireAdmin).Put("/offers/{id}", h.updateOffer)
-	r.With(auth.RequireAdmin).Delete("/offers/{id}", h.deleteOffer)
-	r.Get("/offers/{id}/history", h.offerHistory)
-	r.Get("/alerts", h.listAlerts)
-	r.Post("/alerts", h.createAlert)
-	r.Put("/alerts/{id}", h.updateAlert)
-	r.Delete("/alerts/{id}", h.deleteAlert)
-	r.Get("/requisitions", h.listRequisitions)
+	r.With(h.requireMCPFinancial).Get("/products/{id}/offers", h.listOffers)
+	r.With(h.requireMCPFinancial, auth.RequireAdmin).Post("/products/{id}/offers", h.createOffer)
+	r.With(h.requireMCPFinancial, auth.RequireAdmin).Put("/offers/{id}", h.updateOffer)
+	r.With(h.requireMCPFinancial, auth.RequireAdmin).Delete("/offers/{id}", h.deleteOffer)
+	r.With(h.requireMCPFinancial).Get("/offers/{id}/history", h.offerHistory)
+	r.With(h.requireMCPFinancial).Get("/alerts", h.listAlerts)
+	r.With(h.rejectUnguidedMCP).Post("/alerts", h.createAlert)
+	r.With(h.rejectUnguidedMCP).Put("/alerts/{id}", h.updateAlert)
+	r.With(h.rejectUnguidedMCP).Delete("/alerts/{id}", h.deleteAlert)
+	r.With(h.requireMCPFinancial).Get("/requisitions", h.listRequisitions)
 	r.Get("/amazon/punchout/config", h.amazonConfig)
-	r.Post("/amazon/punchout/start", h.startAmazonPunchout)
-	r.Get("/requisitions/{id}", h.getRequisition)
+	r.With(h.rejectUnguidedMCP).Post("/amazon/punchout/start", h.startAmazonPunchout)
+	r.With(h.requireMCPFinancial).Get("/requisitions/{id}", h.getRequisition)
 	r.With(h.onlyLegacyRequisitionDraftReplay("create")).Post("/requisitions", h.createRequisition)
-	r.Post("/requisitions/offer-preview", h.previewRequisitionOffer)
-	r.With(auth.RequireAdmin).Post("/requisitions/from-offer", h.createRequisitionFromOffer)
+	r.With(h.rejectUnguidedMCP).Post("/requisitions/offer-preview", h.previewRequisitionOffer)
+	r.With(h.rejectUnguidedMCP, auth.RequireAdmin).Post("/requisitions/from-offer", h.createRequisitionFromOffer)
 	r.With(h.onlyLegacyRequisitionDraftReplay("update")).Put("/requisitions/{id}", h.updateRequisition)
 	r.With(h.onlyLegacyRequisitionDraftReplay("submit")).Post("/requisitions/{id}/submit", h.submitRequisition)
 	r.With(auth.RequireAdmin, h.onlyLegacyApprovalReplay("requisitions")).Post("/requisitions/{id}/decision", h.decideRequisition)
-	r.With(auth.RequireAdmin).Post("/requisitions/{id}/order", h.convertRequisition)
-	r.Get("/orders", h.listOrders)
-	r.Get("/orders/{id}", h.getOrder)
-	r.With(auth.RequireAdmin).Post("/orders/import-preview", h.previewOrderImport)
+	r.With(h.requireMCPFinancial, auth.RequireAdmin).Post("/requisitions/{id}/order", h.convertRequisition)
+	r.With(h.requireMCPFinancial).Get("/orders", h.listOrders)
+	r.With(h.requireMCPFinancial).Get("/orders/{id}", h.getOrder)
+	r.With(h.rejectUnguidedMCP, auth.RequireAdmin).Post("/orders/import-preview", h.previewOrderImport)
 	r.With(auth.RequireAdmin, h.onlyLegacyOrderDraftReplay("create")).Post("/orders", h.createOrder)
 	r.With(auth.RequireAdmin, h.onlyLegacyApprovalReplay("orders")).Put("/orders/{id}", h.updateOrder)
 	r.With(auth.RequireAdmin, h.onlyLegacyOrderDraftReplay("update")).Put("/orders/{id}/draft", h.updateOrderDraft)
-	r.With(auth.RequireAdmin).Post("/orders/{id}/adam-hall/cart", h.previewAdamHallOrder)
-	r.With(auth.RequireAdmin).Post("/orders/{id}/adam-hall/order", h.placeAdamHallOrder)
-	r.With(auth.RequireAdmin).Get("/orders/{id}/adam-hall/review", h.reviewAdamHallOrder)
-	r.With(auth.RequireAdmin).Get("/orders/{id}/adam-hall/send-review", h.reviewAdamHallSubmission)
-	r.With(auth.RequireAdmin).Post("/orders/{id}/amazon/submit", h.submitAmazonOrder)
-	r.With(auth.RequireAdmin).Post("/orders/{id}/receipt", h.receiveOrder)
-	r.Get("/activity", h.listActivity)
-	r.Get("/export/spend.csv", h.exportSpend)
+	r.With(h.requireMCPFinancial, auth.RequireAdmin).Post("/orders/{id}/adam-hall/cart", h.previewAdamHallOrder)
+	r.With(h.requireMCPFinancial, auth.RequireAdmin).Post("/orders/{id}/adam-hall/order", h.placeAdamHallOrder)
+	r.With(h.requireMCPFinancial, auth.RequireAdmin).Get("/orders/{id}/adam-hall/review", h.reviewAdamHallOrder)
+	r.With(h.requireMCPFinancial, auth.RequireAdmin).Get("/orders/{id}/adam-hall/send-review", h.reviewAdamHallSubmission)
+	r.With(h.requireMCPFinancial, auth.RequireAdmin).Post("/orders/{id}/amazon/submit", h.submitAmazonOrder)
+	r.With(h.requireMCPFinancial, auth.RequireAdmin).Post("/orders/{id}/receipt", h.receiveOrder)
+	r.With(h.requireMCPFinancial).Get("/activity", h.listActivity)
+	r.With(h.requireMCPFinancial).Get("/export/spend.csv", h.exportSpend)
 	return r
 }
 
 func (h *Handler) importProductPreview(w http.ResponseWriter, r *http.Request) {
+	if !requireMCPFinancialDelegation(w, r, "create") {
+		return
+	}
 	var input struct {
 		URL string `json:"url"`
 	}
@@ -805,6 +808,9 @@ func (h *Handler) createProduct(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &input) {
 		return
 	}
+	if input.InitialOffer != nil && !requireMCPFinancialDelegation(w, r, "create") {
+		return
+	}
 	row := input.Product
 	if msg := validateProduct(&row); msg != "" {
 		badRequest(w, msg)
@@ -1070,6 +1076,9 @@ func validateOffer(row *models.Offer) string {
 }
 
 func (h *Handler) createOffer(w http.ResponseWriter, r *http.Request) {
+	if !requireMCPFinancialDelegation(w, r, "create") {
+		return
+	}
 	productID, ok := pathID(w, r)
 	if !ok {
 		return
@@ -1120,6 +1129,9 @@ func (h *Handler) createOffer(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) updateOffer(w http.ResponseWriter, r *http.Request) {
+	if !requireMCPFinancialDelegation(w, r, "update") {
+		return
+	}
 	id, ok := pathID(w, r)
 	if !ok {
 		return

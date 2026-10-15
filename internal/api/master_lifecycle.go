@@ -16,8 +16,6 @@ import (
 	"procurementcore/internal/models"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/golang-jwt/jwt/v5"
-	commonjwt "github.com/nbt4/cores-common/pkg/jwt"
 	"gorm.io/gorm"
 )
 
@@ -61,20 +59,12 @@ func (h *Handler) masterLifecycle(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Real procurement administrator and MCP origin required"})
 		return
 	}
-	var claims struct {
-		UID   uint   `json:"uid"`
-		Scope string `json:"mcp_scope"`
-		jwt.RegisteredClaims
-	}
-	rawToken := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if cookie, err := r.Cookie("cores_token"); err == nil {
-		rawToken = cookie.Value
-	}
-	tok, err := jwt.ParseWithClaims(rawToken, &claims, func(*jwt.Token) (any, error) { return commonjwt.JWTSecret(), nil }, jwt.WithValidMethods([]string{"HS256"}), jwt.WithExpirationRequired())
-	if err != nil || !tok.Valid || claims.UID != user.ID || claims.Scope != "cores:procurement:archive" {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Signed real-user procurement archive delegation required"})
+	claims, valid := procurementDelegation(r)
+	if !valid || claims.actionScope() != "cores:procurement:archive" || entity == "offers" && !claims.financialGranted() {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Signed real-user procurement archive delegation and offer financial access required"})
 		return
 	}
+
 	var input masterLifecycleRequest
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192))
 	decoder.DisallowUnknownFields()
@@ -84,7 +74,7 @@ func (h *Handler) masterLifecycle(w http.ResponseWriter, r *http.Request) {
 	}
 	preview := input.Preview || !input.ConfirmChange
 	result := map[string]any{}
-	err = h.db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+	err := h.db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Exec(`SET LOCAL lock_timeout='5s';SET LOCAL statement_timeout='20s';SET LOCAL TIME ZONE 'UTC'`).Error; err != nil {
 			return err
 		}

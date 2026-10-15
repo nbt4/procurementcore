@@ -146,6 +146,7 @@ func TestProductUpdateVersionAuditArchiveAndReplay(t *testing.T) {
 	if err := db.Create(&supplier).Error; err != nil {
 		t.Fatal(err)
 	}
+	financialGranted := true
 	create := func(key string, supplierID uint) *httptest.ResponseRecorder {
 		payload := map[string]any{"sku": "NODE-NEW", "name": "New Node", "categoryId": category.ID, "active": true,
 			"initialOffer": map[string]any{"supplierId": supplierID, "priceCents": 12900, "currency": "EUR", "active": true}}
@@ -157,7 +158,7 @@ func TestProductUpdateVersionAuditArchiveAndReplay(t *testing.T) {
 		r.Header.Set("X-Cores-Origin", "MCP/AI")
 		r.Header.Set("Idempotency-Key", key)
 		w := httptest.NewRecorder()
-		h.createProduct(w, r)
+		serveFinancialTestRequest(t, h.createProduct, w, r, "create", financialGranted)
 		return w
 	}
 	if response := create("product-create-invalid-supplier", supplier.ID+100); response.Code != http.StatusConflict {
@@ -192,7 +193,7 @@ func TestProductUpdateVersionAuditArchiveAndReplay(t *testing.T) {
 		route.URLParams.Add("id", strconv.FormatUint(uint64(newProduct.ID), 10))
 		r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, route))
 		w := httptest.NewRecorder()
-		h.createOffer(w, r)
+		serveFinancialTestRequest(t, h.createOffer, w, r, "create", financialGranted)
 		return w
 	}
 	firstOffer := createOffer("offer-create-001")
@@ -221,7 +222,7 @@ func TestProductUpdateVersionAuditArchiveAndReplay(t *testing.T) {
 		route.URLParams.Add("id", strconv.FormatUint(uint64(offer.ID), 10))
 		r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, route))
 		w := httptest.NewRecorder()
-		h.updateOffer(w, r)
+		serveFinancialTestRequest(t, h.updateOffer, w, r, "update", financialGranted)
 		return w
 	}
 	offerDraft := map[string]any{"supplierId": supplier.ID, "supplierSku": "NODE-NEW", "priceCents": 15000, "currency": "EUR", "minimumQuantity": 1, "packSize": 1, "active": false}
@@ -239,6 +240,17 @@ func TestProductUpdateVersionAuditArchiveAndReplay(t *testing.T) {
 	if err := db.First(&offer, offer.ID).Error; err != nil || offer.Active || offer.PriceCents != 15000 {
 		t.Fatalf("offer update not saved: %#v %v", offer, err)
 	}
+	financialGranted = false
+	for _, response := range []*httptest.ResponseRecorder{create("product-create-with-offer", supplier.ID), createOffer("offer-create-001"), updateOffer("offer-update-001", offerDraft)} {
+		if response.Code != http.StatusForbidden || bytes.Contains(response.Body.Bytes(), []byte("priceCents")) {
+			t.Fatalf("revoked grant replay leaked: %d %s", response.Code, response.Body.String())
+		}
+	}
+	financialGranted = true
+	if response := create("product-create-with-offer", supplier.ID); response.Code != http.StatusCreated || response.Body.String() != created.Body.String() {
+		t.Fatal("original receipt changed after denied replay")
+	}
+
 	for table, want := range map[string]int64{"proc_offers": 2, "proc_price_histories": 3, "audit_log": 6, "proc_activities": 6, "proc_idempotency_records": 5} {
 		if err := db.Table(table).Count(&count).Error; err != nil || count != want {
 			t.Fatalf("%s count=%d err=%v, want %d", table, count, err, want)
